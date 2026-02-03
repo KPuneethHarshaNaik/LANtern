@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LANtern - LAN File Sharing</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Landing Page -->
+    <div id="landing-page" class="page active">
+        <div class="landing-container">
+            <div class="logo">
+                <span class="logo-icon">🏮</span>
+                <h1>LANtern</h1>
+            </div>
+            <p class="tagline">Share files locally, without the internet</p>
+            
+            <div class="join-form">
+                <input type="text" id="username" placeholder="Enter your name" maxlength="30" required>
+                <input type="password" id="session-password" placeholder="Session password (required)" maxlength="50" required>
+                
+                <div class="role-buttons">
+                    <button id="join-as-host" class="btn btn-primary">
+                        <span class="btn-icon">👑</span>
+                        Host a Session
+                    </button>
+                    <button id="join-as-client" class="btn btn-secondary">
+                        <span class="btn-icon">👤</span>
+                        Join as Guest
+                    </button>
+                </div>
+            </div>
+
+            <div class="info-box">
+                <h3>How it works</h3>
+                <ul>
+                    <li><strong>Host:</strong> Share files & text with everyone or selected users</li>
+                    <li><strong>Guest:</strong> Download host's files & upload files to host</li>
+                    <li><strong>Secure:</strong> End-to-end encrypted with session password</li>
+                    <li><strong>Limit:</strong> Max file size is 25MB</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Host Dashboard -->
+    <div id="host-page" class="page">
+        <header class="dashboard-header">
+            <div class="header-left">
+                <span class="logo-small">🏮</span>
+                <h2>LANtern</h2>
+                <span class="role-badge host-badge">HOST</span>
+            </div>
+            <div class="header-right">
+                <span id="host-name" class="user-name"></span>
+                <button id="host-logout" class="btn btn-small btn-outline">Leave</button>
+            </div>
+        </header>
+
+        <main class="dashboard-main">
+            <div class="dashboard-grid">
+                <!-- Connected Users Panel -->
+                <section class="panel users-panel">
+                    <div class="panel-header">
+                        <h3>👥 Connected Users</h3>
+                        <span id="user-count" class="count-badge">0</span>
+                    </div>
+                    <div id="users-list" class="users-list">
+                        <p class="empty-state">No users connected yet</p>
+                    </div>
+                </section>
+
+                <!-- Text Sharing Section -->
+                <section class="panel text-panel">
+                    <div class="panel-header">
+                        <h3>💬 Share Text</h3>
+                    </div>
+                    <div class="text-share-area">
+                        <textarea id="host-text-input" placeholder="Type a message to share..." rows="3"></textarea>
+                        <div class="text-share-options">
+                            <div class="share-toggle small">
+                                <button id="text-share-all-btn" class="toggle-btn active">Everyone</button>
+                                <button id="text-share-selected-btn" class="toggle-btn">Selected</button>
+                            </div>
+                            <button id="host-send-text-btn" class="btn btn-primary btn-small">Send 🔒</button>
+                        </div>
+                    </div>
+                    <div id="host-shared-texts" class="shared-texts-list">
+                        <p class="empty-state">No messages shared yet</p>
+                    </div>
+                </section>
+
+                <!-- Upload Section -->
+                <section class="panel upload-panel">
+                    <div class="panel-header">
+                        <h3>📤 Share Files</h3>
+                    </div>
+                    <div class="upload-area" id="host-upload-area">
+                        <div class="upload-dropzone" id="host-dropzone">
+                            <span class="upload-icon">📁</span>
+                            <p>Drag & drop files here</p>
+                            <p class="upload-hint">or click to browse (max 25MB)</p>
+                            <input type="file" id="host-file-input" multiple hidden>
+                        </div>
+                        
+                        <div class="share-options">
+                            <label class="share-label">Share with:</label>
+                            <div class="share-toggle">
+                                <button id="share-all-btn" class="toggle-btn active">Everyone</button>
+                                <button id="share-selected-btn" class="toggle-btn">Selected Users</button>
+                            </div>
+                            <div id="user-select-container" class="user-select-container hidden">
+                                <div id="user-checkboxes" class="user-checkboxes">
+                                    <!-- User checkboxes will be added dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button id="host-upload-btn" class="btn btn-primary btn-full" disabled>
+                            🔒 Upload & Share (Encrypted)
+                        </button>
+                    </div>
+                </section>
+
+                <!-- My Shared Files -->
+                <section class="panel files-panel">
+                    <div class="panel-header">
+                        <h3>📂 My Shared Files</h3>
+                        <span id="host-files-count" class="count-badge">0</span>
+                    </div>
+                    <div id="host-files-list" class="files-list">
+                        <p class="empty-state">No files shared yet</p>
+                    </div>
+                </section>
+
+                <!-- Received Texts from Clients -->
+                <section class="panel text-panel">
+                    <div class="panel-header">
+                        <h3>💬 Received Messages</h3>
+                        <span id="host-received-texts-count" class="count-badge">0</span>
+                    </div>
+                    <div id="host-received-texts" class="shared-texts-list">
+                        <p class="empty-state">No messages received yet</p>
+                    </div>
+                </section>
+
+                <!-- Received Files from Clients -->
+                <section class="panel files-panel">
+                    <div class="panel-header">
+                        <h3>📥 Received Files</h3>
+                        <span id="client-files-count" class="count-badge">0</span>
+                    </div>
+                    <div id="received-files-list" class="files-list">
+                        <p class="empty-state">No files received yet</p>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Client Dashboard -->
+    <div id="client-page" class="page">
+        <header class="dashboard-header">
+            <div class="header-left">
+                <span class="logo-small">🏮</span>
+                <h2>LANtern</h2>
+                <span class="role-badge client-badge">GUEST</span>
+            </div>
+            <div class="header-right">
+                <span id="client-name" class="user-name"></span>
+                <button id="client-logout" class="btn btn-small btn-outline">Leave</button>
+            </div>
+        </header>
+
+        <main class="dashboard-main">
+            <div class="dashboard-grid client-grid">
+                <!-- Text to Host -->
+                <section class="panel text-panel">
+                    <div class="panel-header">
+                        <h3>💬 Send Text to Host</h3>
+                    </div>
+                    <div class="text-share-area">
+                        <textarea id="client-text-input" placeholder="Type a message for the host..." rows="3"></textarea>
+                        <button id="client-send-text-btn" class="btn btn-primary btn-full btn-small">Send to Host 🔒</button>
+                    </div>
+                </section>
+
+                <!-- Upload to Host -->
+                <section class="panel upload-panel">
+                    <div class="panel-header">
+                        <h3>📤 Send Files to Host</h3>
+                    </div>
+                    <div class="upload-area" id="client-upload-area">
+                        <div class="upload-dropzone" id="client-dropzone">
+                            <span class="upload-icon">📁</span>
+                            <p>Drag & drop files here</p>
+                            <p class="upload-hint">or click to browse (max 25MB)</p>
+                            <input type="file" id="client-file-input" multiple hidden>
+                        </div>
+                        <button id="client-upload-btn" class="btn btn-primary btn-full" disabled>
+                            🔒 Send to Host (Encrypted)
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Received Texts from Host -->
+                <section class="panel text-panel">
+                    <div class="panel-header">
+                        <h3>💬 Messages from Host</h3>
+                        <span id="received-texts-count" class="count-badge">0</span>
+                    </div>
+                    <div id="client-received-texts" class="shared-texts-list">
+                        <p class="empty-state">No messages received yet</p>
+                    </div>
+                </section>
+
+                <!-- Available Files from Host -->
+                <section class="panel files-panel">
+                    <div class="panel-header">
+                        <h3>📥 Available Downloads</h3>
+                        <span id="available-files-count" class="count-badge">0</span>
+                    </div>
+                    <div id="available-files-list" class="files-list">
+                        <p class="empty-state">No files available for download</p>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Upload Progress Modal -->
+    <div id="progress-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Uploading...</h3>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <p id="progress-text">0%</p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
