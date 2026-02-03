@@ -186,6 +186,8 @@ class LANternApp {
         this.hostSendTextBtn = document.getElementById('host-send-text-btn');
         this.textShareAllBtn = document.getElementById('text-share-all-btn');
         this.textShareSelectedBtn = document.getElementById('text-share-selected-btn');
+        this.textUserSelectContainer = document.getElementById('text-user-select-container');
+        this.textUserCheckboxes = document.getElementById('text-user-checkboxes');
         this.hostSharedTexts = document.getElementById('host-shared-texts');
         this.hostReceivedTexts = document.getElementById('host-received-texts');
         this.hostReceivedTextsCount = document.getElementById('host-received-texts-count');
@@ -209,6 +211,26 @@ class LANternApp {
         this.progressModal = document.getElementById('progress-modal');
         this.progressFill = document.getElementById('progress-fill');
         this.progressText = document.getElementById('progress-text');
+
+        // Chat elements
+        this.hostChatMessages = document.getElementById('host-chat-messages');
+        this.hostChatInput = document.getElementById('host-chat-input');
+        this.hostChatSend = document.getElementById('host-chat-send');
+        this.clientChatMessages = document.getElementById('client-chat-messages');
+        this.clientChatInput = document.getElementById('client-chat-input');
+        this.clientChatSend = document.getElementById('client-chat-send');
+
+        // Batch download buttons
+        this.hostDownloadAllBtn = document.getElementById('host-download-all-btn');
+        this.clientDownloadAllBtn = document.getElementById('client-download-all-btn');
+        this.hostDownloadReceivedBtn = document.getElementById('host-download-client-files-btn');
+
+        // Preview modal
+        this.previewModal = document.getElementById('preview-modal');
+        this.previewClose = document.getElementById('preview-close');
+        this.previewTitle = document.getElementById('preview-filename');
+        this.previewContainer = document.getElementById('preview-container');
+        this.previewDownload = document.getElementById('preview-download');
     }
 
     bindEvents() {
@@ -259,6 +281,35 @@ class LANternApp {
                 this.sendText(false);
             }
         });
+
+        // Chat events
+        this.hostChatSend?.addEventListener('click', () => this.sendChatMessage(true));
+        this.hostChatInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.sendChatMessage(true);
+        });
+        this.clientChatSend?.addEventListener('click', () => this.sendChatMessage(false));
+        this.clientChatInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.sendChatMessage(false);
+        });
+
+        // Batch download events
+        this.hostDownloadAllBtn?.addEventListener('click', () => this.downloadAllFiles('host'));
+        this.clientDownloadAllBtn?.addEventListener('click', () => this.downloadAllFiles('host'));
+        this.hostDownloadReceivedBtn?.addEventListener('click', () => this.downloadAllFiles('client'));
+
+        // Preview modal events
+        this.previewClose?.addEventListener('click', () => this.closePreview());
+        this.previewModal?.addEventListener('click', (e) => {
+            if (e.target === this.previewModal) this.closePreview();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.previewModal?.classList.contains('active')) {
+                this.closePreview();
+            }
+        });
+
+        // Store the current preview file for download
+        this.currentPreviewFile = null;
     }
 
     setupDropzone(dropzone, fileInput, isHost) {
@@ -387,6 +438,16 @@ class LANternApp {
             this.updateTextsCount();
             this.checkEmptyStates();
         });
+
+        // Chat message listener
+        this.socket.on('newChatMessage', (message) => {
+            this.displayChatMessage(message);
+        });
+
+        // Load chat history on connect
+        this.socket.on('chatHistory', (messages) => {
+            messages.forEach(msg => this.displayChatMessage(msg, false));
+        });
     }
 
     async joinSession(asHost) {
@@ -426,6 +487,31 @@ class LANternApp {
             this.clientPage.classList.add('active');
             this.clientNameEl.textContent = this.user.name;
         }
+
+        // Load chat history
+        this.loadChatHistory();
+    }
+
+    async loadChatHistory() {
+        try {
+            const response = await fetch('/api/chat');
+            const data = await response.json();
+            
+            if (data.messages && data.messages.length > 0) {
+                // Clear empty state
+                const chatMessages = this.isHost ? this.hostChatMessages : this.clientChatMessages;
+                if (chatMessages) {
+                    const emptyState = chatMessages.querySelector('.chat-empty');
+                    if (emptyState) emptyState.remove();
+                }
+                
+                for (const msg of data.messages) {
+                    await this.displayChatMessage(msg, false);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load chat history:', error);
+        }
     }
 
     logout() {
@@ -452,9 +538,39 @@ class LANternApp {
         if (mode === 'all') {
             this.textShareAllBtn.classList.add('active');
             this.textShareSelectedBtn.classList.remove('active');
+            this.textUserSelectContainer.classList.add('hidden');
         } else {
             this.textShareAllBtn.classList.remove('active');
             this.textShareSelectedBtn.classList.add('active');
+            this.textUserSelectContainer.classList.remove('hidden');
+            this.updateTextUserCheckboxes();
+        }
+    }
+
+    updateTextUserCheckboxes() {
+        if (!this.isHost || !this.textUserCheckboxes) return;
+
+        if (this.connectedUsers.length === 0) {
+            this.textUserCheckboxes.innerHTML = '<p style="color: var(--text-muted); font-size: 12px;">No users to select</p>';
+        } else {
+            this.textUserCheckboxes.innerHTML = this.connectedUsers.map(user => `
+                <label class="user-checkbox">
+                    <input type="checkbox" value="${user.id}" ${this.selectedUsersToShare.includes(user.id) ? 'checked' : ''}>
+                    ${this.escapeHtml(user.name)}
+                </label>
+            `).join('');
+
+            this.textUserCheckboxes.querySelectorAll('input').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    if (e.target.checked) {
+                        if (!this.selectedUsersToShare.includes(e.target.value)) {
+                            this.selectedUsersToShare.push(e.target.value);
+                        }
+                    } else {
+                        this.selectedUsersToShare = this.selectedUsersToShare.filter(id => id !== e.target.value);
+                    }
+                });
+            });
         }
     }
 
@@ -769,6 +885,12 @@ class LANternApp {
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
         fileItem.dataset.fileId = file.id;
+        
+        // Check if file is previewable
+        const ext = displayName.split('.').pop().toLowerCase();
+        const previewableExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'mp4', 'webm', 'ogg', 'mov', 'mp3', 'wav', 'flac', 'm4a', 'pdf', 'txt', 'md', 'json', 'js', 'ts', 'py', 'html', 'css', 'xml', 'csv', 'log'];
+        const canPreview = previewableExts.includes(ext);
+
         fileItem.innerHTML = `
             <span class="file-icon">${fileIcon}</span>
             <div class="file-info">
@@ -784,6 +906,7 @@ class LANternApp {
                 </div>
             </div>
             <div class="file-actions">
+                ${canPreview ? `<button class="btn-preview" onclick="app.previewFile('${file.id}', '${this.escapeHtml(displayName).replace(/'/g, "\\'")}')">👁 Preview</button>` : ''}
                 <button class="btn-download" onclick="app.downloadFile('${file.id}', '${this.escapeHtml(displayName).replace(/'/g, "\\'")}')">⬇ Download</button>
                 ${canDelete ? `<button class="btn-delete" onclick="app.deleteFile('${file.id}')">✕</button>` : ''}
             </div>
@@ -913,6 +1036,198 @@ class LANternApp {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // ============ CHAT FUNCTIONALITY ============
+    async sendChatMessage(isHost) {
+        const chatInput = isHost ? this.hostChatInput : this.clientChatInput;
+        const message = chatInput.value.trim();
+
+        if (!message) return;
+
+        try {
+            const encryptedMessage = await this.crypto.encrypt(message);
+            
+            this.socket.emit('chatMessage', {
+                content: encryptedMessage,
+                userId: this.user.id,
+                userName: this.user.name,
+                isHost: this.isHost
+            });
+
+            chatInput.value = '';
+        } catch (error) {
+            this.showToast('Failed to send message: ' + error.message, 'error');
+        }
+    }
+
+    async displayChatMessage(message, animate = true) {
+        const chatMessages = this.isHost ? this.hostChatMessages : this.clientChatMessages;
+        if (!chatMessages) return;
+
+        // Remove empty state
+        const emptyState = chatMessages.querySelector('.chat-empty');
+        if (emptyState) emptyState.remove();
+
+        let content;
+        try {
+            content = await this.crypto.decrypt(message.content);
+        } catch (error) {
+            content = '[Unable to decrypt]';
+        }
+
+        const isOwn = message.userId === this.user.id;
+        const time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        const msgEl = document.createElement('div');
+        msgEl.className = `chat-message ${isOwn ? 'own' : 'other'}`;
+        if (!animate) msgEl.style.animation = 'none';
+        
+        msgEl.innerHTML = `
+            <div class="message-header">
+                <span class="message-sender">${this.escapeHtml(message.userName)}${message.isHost ? ' (Host)' : ''}</span>
+                <span class="message-time">${time}</span>
+            </div>
+            <div class="message-bubble">${this.escapeHtml(content)}</div>
+        `;
+
+        chatMessages.appendChild(msgEl);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // ============ FILE PREVIEW FUNCTIONALITY ============
+    async previewFile(fileId, originalName) {
+        try {
+            this.showToast('Loading preview...', 'info');
+            
+            const response = await fetch(`/api/download/${fileId}?userId=${this.user.id}&isHost=${this.isHost}`);
+            
+            if (!response.ok) throw new Error('Failed to load file');
+
+            const encryptedBlob = await response.blob();
+            const decryptedBlob = await this.crypto.decryptFile(encryptedBlob, originalName);
+            
+            const ext = originalName.split('.').pop().toLowerCase();
+            const url = URL.createObjectURL(decryptedBlob);
+            
+            this.previewTitle.textContent = originalName;
+            this.previewContainer.innerHTML = '';
+
+            // Determine preview type
+            const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+            const videoExts = ['mp4', 'webm', 'ogg', 'mov'];
+            const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'm4a'];
+            const textExts = ['txt', 'md', 'json', 'js', 'ts', 'py', 'html', 'css', 'xml', 'csv', 'log'];
+
+            if (imageExts.includes(ext)) {
+                const img = document.createElement('img');
+                img.src = url;
+                img.alt = originalName;
+                this.previewContainer.appendChild(img);
+            } else if (videoExts.includes(ext)) {
+                const video = document.createElement('video');
+                video.src = url;
+                video.controls = true;
+                video.autoplay = false;
+                this.previewContainer.appendChild(video);
+            } else if (audioExts.includes(ext)) {
+                const audio = document.createElement('audio');
+                audio.src = url;
+                audio.controls = true;
+                this.previewContainer.appendChild(audio);
+            } else if (ext === 'pdf') {
+                const iframe = document.createElement('iframe');
+                iframe.src = url;
+                this.previewContainer.appendChild(iframe);
+            } else if (textExts.includes(ext)) {
+                const text = await decryptedBlob.text();
+                const pre = document.createElement('pre');
+                pre.textContent = text;
+                this.previewContainer.appendChild(pre);
+            } else {
+                this.previewContainer.innerHTML = `
+                    <div class="preview-unsupported">
+                        <i>📁</i>
+                        <p>Preview not available for this file type</p>
+                        <p>Click download to save the file</p>
+                    </div>
+                `;
+            }
+
+            this.previewModal.classList.add('active');
+            
+            // Store URL for cleanup
+            this.currentPreviewUrl = url;
+        } catch (error) {
+            this.showToast('Preview failed: ' + error.message, 'error');
+        }
+    }
+
+    closePreview() {
+        this.previewModal?.classList.remove('active');
+        this.previewContainer.innerHTML = '';
+        
+        if (this.currentPreviewUrl) {
+            URL.revokeObjectURL(this.currentPreviewUrl);
+            this.currentPreviewUrl = null;
+        }
+    }
+
+    // ============ BATCH DOWNLOAD FUNCTIONALITY ============
+    async downloadAllFiles(type) {
+        try {
+            const btn = type === 'host' 
+                ? (this.isHost ? this.hostDownloadAllBtn : this.clientDownloadAllBtn)
+                : this.hostDownloadReceivedBtn;
+            
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i>⏳</i> Downloading...';
+            }
+
+            this.showToast('Preparing batch download...', 'info');
+
+            const response = await fetch(`/api/download-all?type=${type}&userId=${this.user.id}&isHost=${this.isHost}`);
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Download failed');
+            }
+
+            // Get the ZIP blob
+            const zipBlob = await response.blob();
+            
+            if (zipBlob.size < 100) {
+                throw new Error('No files available for download');
+            }
+
+            // Create a new ZIP with decrypted files
+            this.showToast('Decrypting files...', 'info');
+            
+            // Download as ZIP (files are encrypted, user can decrypt individually)
+            const url = URL.createObjectURL(zipBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `LANtern-${type}-files-${Date.now()}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            this.showToast('Download complete! Note: Files are encrypted in the ZIP.', 'success');
+        } catch (error) {
+            this.showToast('Batch download failed: ' + error.message, 'error');
+        } finally {
+            // Reset button
+            const btn = type === 'host' 
+                ? (this.isHost ? this.hostDownloadAllBtn : this.clientDownloadAllBtn)
+                : this.hostDownloadReceivedBtn;
+            
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i>📦</i> Download All';
+            }
+        }
     }
 
     showToast(message, type = 'info') {

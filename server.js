@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const os = require('os');
+const archiver = require('archiver');
 
 const app = express();
 const server = http.createServer(app);
@@ -31,6 +32,7 @@ const connectedUsers = new Map(); // socketId -> { id, name, isHost }
 const hostFiles = new Map(); // fileId -> { filename, originalName, size, uploadedAt, sharedWith: [] | 'all' }
 const clientFiles = new Map(); // fileId -> { filename, originalName, size, uploadedAt, uploadedBy }
 const sharedTexts = new Map(); // textId -> { content, sharedWith, uploadedBy, uploadedAt }
+const chatMessages = []; // Array of chat messages
 let hostSocketId = null;
 let sessionPassword = null; // Password for the session
 
@@ -45,7 +47,9 @@ const storage = multer.diskStorage({
         cb(null, isHost ? uploadDirs.hostFiles : uploadDirs.clientFiles);
     },
     filename: (req, file, cb) => {
-        const uniqueName = `${uuidv4()}-${file.originalname}`;
+        // Sanitize filename: use UUID + extension only to avoid path issues
+        const ext = path.extname(file.originalname) || '';
+        const uniqueName = `${uuidv4()}${ext}`;
         cb(null, uniqueName);
     }
 });
@@ -317,6 +321,69 @@ app.delete('/api/texts/:textId', (req, res) => {
     res.json({ success: true });
 });
 
+// Batch download - Download all files as ZIP
+app.get('/api/download-all', (req, res) => {
+    try {
+        const userId = req.query.userId;
+        const isHost = req.query.isHost === 'true';
+        const fileType = req.query.type || 'host'; // 'host' or 'client'
+
+        let files = [];
+        let baseDir = '';
+
+        if (fileType === 'host') {
+            baseDir = uploadDirs.hostFiles;
+            if (isHost) {
+                files = Array.from(hostFiles.values());
+            } else {
+                files = Array.from(hostFiles.values()).filter(file => {
+                    return file.sharedWith === 'all' || file.sharedWith.includes(userId);
+                });
+            }
+        } else if (fileType === 'client' && isHost) {
+            baseDir = uploadDirs.clientFiles;
+            files = Array.from(clientFiles.values());
+        }
+
+        if (files.length === 0) {
+            return res.status(404).json({ error: 'No files to download' });
+        }
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename=LANtern-files-${Date.now()}.zip`);
+
+        const archive = archiver('zip', { zlib: { level: 5 } });
+        
+        archive.on('error', (err) => {
+            console.error('Archive error:', err);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Failed to create archive' });
+            }
+        });
+
+        archive.pipe(res);
+
+        files.forEach(file => {
+            const filePath = path.join(baseDir, file.filename);
+            if (fs.existsSync(filePath)) {
+                archive.file(filePath, { name: file.originalName });
+            }
+        });
+
+        archive.finalize();
+    } catch (error) {
+        console.error('Batch download error:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Batch download failed' });
+        }
+    }
+});
+
+// Get chat messages
+app.get('/api/chat', (req, res) => {
+    res.json({ messages: chatMessages.slice(-100) }); // Return last 100 messages
+});
+
 // Get connected users (for host)
 app.get('/api/users', (req, res) => {
     const users = Array.from(connectedUsers.values()).filter(u => !u.isHost);
@@ -391,6 +458,7 @@ io.on('connection', (socket) => {
                 hostFiles.clear();
                 clientFiles.clear();
                 sharedTexts.clear();
+                chatMessages.length = 0; // Clear chat
                 // Notify all clients that session ended
                 io.emit('sessionEnded', { message: 'Host has ended the session' });
             }
@@ -405,6 +473,31 @@ io.on('connection', (socket) => {
                 io.to(hostSocketId).emit('userLeft', user);
             }
         }
+    });
+
+    // Handle chat messages
+    socket.on('chatMessage', (data) => {
+        const user = connectedUsers.get(socket.id);
+        if (!user) return;
+
+        const message = {
+            id: uuidv4(),
+            userId: user.id,
+            userName: user.name,
+            isHost: user.isHost,
+            content: data.content, // Already encrypted
+            timestamp: new Date().toISOString()
+        };
+
+        chatMessages.push(message);
+        
+        // Keep only last 100 messages
+        if (chatMessages.length > 100) {
+            chatMessages.shift();
+        }
+
+        // Broadcast to all connected users
+        io.emit('newChatMessage', message);
     });
 });
 

@@ -88,6 +88,11 @@
                             </div>
                             <button id="host-send-text-btn" class="btn btn-primary btn-small">Send 🔒</button>
                         </div>
+                        <div id="text-user-select-container" class="user-select-container hidden">
+                            <div id="text-user-checkboxes" class="user-checkboxes">
+                                <!-- User checkboxes will be added dynamically -->
+                            </div>
+                        </div>
                     </div>
                     <div id="host-shared-texts" class="shared-texts-list">
                         <p class="empty-state">No messages shared yet</p>
@@ -130,7 +135,10 @@
                 <section class="panel files-panel">
                     <div class="panel-header">
                         <h3>📂 My Shared Files</h3>
-                        <span id="host-files-count" class="count-badge">0</span>
+                        <div class="header-actions">
+                            <button id="host-download-all-btn" class="btn btn-small btn-outline" title="Download all as ZIP">📦 Download All</button>
+                            <span id="host-files-count" class="count-badge">0</span>
+                        </div>
                     </div>
                     <div id="host-files-list" class="files-list">
                         <p class="empty-state">No files shared yet</p>
@@ -152,10 +160,27 @@
                 <section class="panel files-panel">
                     <div class="panel-header">
                         <h3>📥 Received Files</h3>
-                        <span id="client-files-count" class="count-badge">0</span>
+                        <div class="header-actions">
+                            <button id="host-download-client-files-btn" class="btn btn-small btn-outline" title="Download all as ZIP">📦 Download All</button>
+                            <span id="client-files-count" class="count-badge">0</span>
+                        </div>
                     </div>
                     <div id="received-files-list" class="files-list">
                         <p class="empty-state">No files received yet</p>
+                    </div>
+                </section>
+
+                <!-- Chat Panel -->
+                <section class="panel chat-panel">
+                    <div class="panel-header">
+                        <h3>💬 Group Chat</h3>
+                    </div>
+                    <div id="host-chat-messages" class="chat-messages">
+                        <p class="chat-empty">No messages yet. Start the conversation!</p>
+                    </div>
+                    <div class="chat-input-area">
+                        <input type="text" id="host-chat-input" placeholder="Type a message..." maxlength="500">
+                        <button id="host-chat-send" class="btn btn-primary btn-small">Send</button>
                     </div>
                 </section>
             </div>
@@ -222,10 +247,27 @@
                 <section class="panel files-panel">
                     <div class="panel-header">
                         <h3>📥 Available Downloads</h3>
-                        <span id="available-files-count" class="count-badge">0</span>
+                        <div class="header-actions">
+                            <button id="client-download-all-btn" class="btn btn-small btn-outline" title="Download all as ZIP">📦 Download All</button>
+                            <span id="available-files-count" class="count-badge">0</span>
+                        </div>
                     </div>
                     <div id="available-files-list" class="files-list">
                         <p class="empty-state">No files available for download</p>
+                    </div>
+                </section>
+
+                <!-- Chat Panel -->
+                <section class="panel chat-panel">
+                    <div class="panel-header">
+                        <h3>💬 Group Chat</h3>
+                    </div>
+                    <div id="client-chat-messages" class="chat-messages">
+                        <p class="chat-empty">No messages yet. Start the conversation!</p>
+                    </div>
+                    <div class="chat-input-area">
+                        <input type="text" id="client-chat-input" placeholder="Type a message..." maxlength="500">
+                        <button id="client-chat-send" class="btn btn-primary btn-small">Send</button>
                     </div>
                 </section>
             </div>
@@ -243,6 +285,17 @@
                 <div id="progress-fill" class="progress-fill"></div>
             </div>
             <p id="progress-text">0%</p>
+        </div>
+    </div>
+
+    <!-- File Preview Modal -->
+    <div id="preview-modal" class="preview-modal">
+        <div class="preview-modal-content">
+            <button id="preview-close" class="preview-close">✕</button>
+            <h3 id="preview-filename" class="preview-title">File Preview</h3>
+            <div id="preview-container" class="preview-container">
+                <!-- Preview content will be inserted here -->
+            </div>
         </div>
     </div>
 
