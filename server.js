@@ -85,6 +85,13 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB limit
 
+// Host key - only the person with this key can host a session
+// Change this to your own secret key!
+const HOST_KEY = process.env.HOST_KEY || 'lantern-admin-2026';
+
+// Blocked users storage (by name/IP combination)
+const blockedUsers = new Set(); // Stores identifiers of blocked users
+
 // Create directories if they don't exist
 const uploadDirs = {
     hostFiles: path.join(__dirname, 'uploads', 'host-files'),
@@ -466,10 +473,25 @@ io.on('connection', (socket) => {
 
     // User registration
     socket.on('register', (data) => {
-        const { name, isHost, password } = data;
+        const { name, isHost, password, hostKey } = data;
+        
+        // Get client IP for blocking
+        const clientIP = socket.handshake.address || socket.request.connection.remoteAddress;
+        const userIdentifier = `${name.toLowerCase()}:${clientIP}`;
+        
+        // Check if user is blocked
+        if (blockedUsers.has(userIdentifier) || blockedUsers.has(clientIP)) {
+            socket.emit('error', { message: 'You have been blocked from this session' });
+            return;
+        }
         
         // Password validation
         if (isHost) {
+            // Verify host key
+            if (hostKey !== HOST_KEY) {
+                socket.emit('error', { message: 'Invalid host key' });
+                return;
+            }
             // Host sets the session password
             sessionPassword = password;
             console.log('Session password set by host');
@@ -499,6 +521,10 @@ io.on('connection', (socket) => {
         if (isHost) {
             hostSocketId = socket.id;
         }
+        
+        // Store IP with user info for potential blocking
+        userInfo.ip = clientIP;
+        userInfo.identifier = userIdentifier;
 
         // Send back user info
         socket.emit('registered', userInfo);
@@ -568,6 +594,57 @@ io.on('connection', (socket) => {
 
         // Broadcast to all connected users
         io.emit('newChatMessage', message);
+    });
+    
+    // Kick user (host only)
+    socket.on('kickUser', (data) => {
+        const host = connectedUsers.get(socket.id);
+        if (!host || !host.isHost) return;
+        
+        const { userId } = data;
+        
+        // Find the socket of the user to kick
+        for (const [socketId, user] of connectedUsers.entries()) {
+            if (user.id === userId && !user.isHost) {
+                io.to(socketId).emit('kicked', { message: 'You have been removed from the session by the host' });
+                io.sockets.sockets.get(socketId)?.disconnect(true);
+                console.log(`User kicked: ${user.name}`);
+                break;
+            }
+        }
+    });
+    
+    // Block user (host only)
+    socket.on('blockUser', (data) => {
+        const host = connectedUsers.get(socket.id);
+        if (!host || !host.isHost) return;
+        
+        const { userId } = data;
+        
+        // Find the user to block
+        for (const [socketId, user] of connectedUsers.entries()) {
+            if (user.id === userId && !user.isHost) {
+                // Add to blocked list
+                blockedUsers.add(user.identifier);
+                blockedUsers.add(user.ip);
+                
+                io.to(socketId).emit('blocked', { message: 'You have been blocked from this session by the host' });
+                io.sockets.sockets.get(socketId)?.disconnect(true);
+                console.log(`User blocked: ${user.name} (${user.ip})`);
+                break;
+            }
+        }
+    });
+    
+    // Unblock user (host only)
+    socket.on('unblockUser', (data) => {
+        const host = connectedUsers.get(socket.id);
+        if (!host || !host.isHost) return;
+        
+        const { identifier, ip } = data;
+        blockedUsers.delete(identifier);
+        blockedUsers.delete(ip);
+        console.log(`User unblocked`);
     });
 });
 

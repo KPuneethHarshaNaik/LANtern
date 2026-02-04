@@ -161,6 +161,7 @@ class LANternApp {
         this.clientPage = document.getElementById('client-page');
         this.usernameInput = document.getElementById('username');
         this.passwordInput = document.getElementById('session-password');
+        this.hostKeyInput = document.getElementById('host-key');
         this.joinHostBtn = document.getElementById('join-as-host');
         this.joinClientBtn = document.getElementById('join-as-client');
 
@@ -231,6 +232,26 @@ class LANternApp {
         this.previewTitle = document.getElementById('preview-filename');
         this.previewContainer = document.getElementById('preview-container');
         this.previewDownload = document.getElementById('preview-download');
+
+        // Sidebar elements
+        this.hostSidebar = document.getElementById('host-sidebar');
+        this.clientSidebar = document.getElementById('client-sidebar');
+        this.hostHamburger = document.getElementById('host-hamburger');
+        this.clientHamburger = document.getElementById('client-hamburger');
+        this.hostSidebarClose = document.getElementById('host-sidebar-close');
+        this.clientSidebarClose = document.getElementById('client-sidebar-close');
+        this.hostSidebarOverlay = document.getElementById('host-sidebar-overlay');
+        this.clientSidebarOverlay = document.getElementById('client-sidebar-overlay');
+        this.hostPageTitle = document.getElementById('host-page-title');
+        this.clientPageTitle = document.getElementById('client-page-title');
+
+        // Stats elements
+        this.statUsers = document.getElementById('stat-users');
+        this.statFiles = document.getElementById('stat-files');
+        this.statMessages = document.getElementById('stat-messages');
+        this.clientStatFiles = document.getElementById('client-stat-files');
+        this.clientStatMessages = document.getElementById('client-stat-messages');
+        this.navUserCount = document.getElementById('nav-user-count');
     }
 
     bindEvents() {
@@ -310,6 +331,91 @@ class LANternApp {
 
         // Store the current preview file for download
         this.currentPreviewFile = null;
+
+        // Sidebar navigation events
+        this.setupSidebarEvents();
+    }
+
+    setupSidebarEvents() {
+        // Hamburger toggle
+        this.hostHamburger?.addEventListener('click', () => this.toggleSidebar(true, true));
+        this.clientHamburger?.addEventListener('click', () => this.toggleSidebar(false, true));
+        
+        // Close buttons
+        this.hostSidebarClose?.addEventListener('click', () => this.toggleSidebar(true, false));
+        this.clientSidebarClose?.addEventListener('click', () => this.toggleSidebar(false, false));
+        
+        // Overlay click
+        this.hostSidebarOverlay?.addEventListener('click', () => this.toggleSidebar(true, false));
+        this.clientSidebarOverlay?.addEventListener('click', () => this.toggleSidebar(false, false));
+
+        // Navigation items
+        const hostNavItems = this.hostPage?.querySelectorAll('.nav-item');
+        const clientNavItems = this.clientPage?.querySelectorAll('.nav-item');
+
+        hostNavItems?.forEach(item => {
+            item.addEventListener('click', () => this.switchSection(true, item.dataset.section));
+        });
+
+        clientNavItems?.forEach(item => {
+            item.addEventListener('click', () => this.switchSection(false, item.dataset.section));
+        });
+
+        // Quick action buttons
+        const hostActionBtns = this.hostPage?.querySelectorAll('.action-btn[data-goto]');
+        const clientActionBtns = this.clientPage?.querySelectorAll('.action-btn[data-goto]');
+
+        hostActionBtns?.forEach(btn => {
+            btn.addEventListener('click', () => this.switchSection(true, btn.dataset.goto));
+        });
+
+        clientActionBtns?.forEach(btn => {
+            btn.addEventListener('click', () => this.switchSection(false, btn.dataset.goto));
+        });
+    }
+
+    toggleSidebar(isHost, open) {
+        const sidebar = isHost ? this.hostSidebar : this.clientSidebar;
+        const overlay = isHost ? this.hostSidebarOverlay : this.clientSidebarOverlay;
+
+        if (open) {
+            sidebar?.classList.add('open');
+            overlay?.classList.add('active');
+        } else {
+            sidebar?.classList.remove('open');
+            overlay?.classList.remove('active');
+        }
+    }
+
+    switchSection(isHost, sectionName) {
+        const page = isHost ? this.hostPage : this.clientPage;
+        const pageTitle = isHost ? this.hostPageTitle : this.clientPageTitle;
+        
+        // Update nav items
+        const navItems = page?.querySelectorAll('.nav-item');
+        navItems?.forEach(item => {
+            item.classList.toggle('active', item.dataset.section === sectionName);
+        });
+
+        // Update sections
+        const sections = page?.querySelectorAll('.content-section');
+        sections?.forEach(section => {
+            const sectionId = isHost ? `host-section-${sectionName}` : `client-section-${sectionName}`;
+            section.classList.toggle('active', section.id === sectionId);
+        });
+
+        // Update page title
+        const titles = {
+            'home': 'Home',
+            'community': 'Community',
+            'chat': 'Group Chat',
+            'files': 'Files',
+            'messages': 'Messages'
+        };
+        if (pageTitle) pageTitle.textContent = titles[sectionName] || 'Home';
+
+        // Close sidebar on mobile
+        this.toggleSidebar(isHost, false);
     }
 
     setupDropzone(dropzone, fileInput, isHost) {
@@ -360,16 +466,32 @@ class LANternApp {
         this.socket.on('registered', (user) => {
             this.user = user;
             this.isHost = user.isHost;
-            this.showDashboard();
-            this.loadFiles();
-            this.loadTexts();
+            try {
+                this.showDashboard();
+                this.loadFiles();
+                this.loadTexts();
+            } catch (error) {
+                console.error('Error in showDashboard:', error);
+                this.showToast('Error loading dashboard: ' + error.message, 'error');
+            }
         });
 
         this.socket.on('error', (data) => {
+            console.error('Socket error:', data);
             this.showToast(data.message, 'error');
         });
 
         this.socket.on('sessionEnded', (data) => {
+            this.showToast(data.message, 'error');
+            setTimeout(() => location.reload(), 2000);
+        });
+
+        this.socket.on('kicked', (data) => {
+            this.showToast(data.message, 'error');
+            setTimeout(() => location.reload(), 2000);
+        });
+
+        this.socket.on('blocked', (data) => {
             this.showToast(data.message, 'error');
             setTimeout(() => location.reload(), 2000);
         });
@@ -453,6 +575,7 @@ class LANternApp {
     async joinSession(asHost) {
         const name = this.usernameInput.value.trim();
         const password = this.passwordInput.value.trim();
+        const hostKey = this.hostKeyInput ? this.hostKeyInput.value.trim() : '';
 
         if (!name) {
             this.showToast('Please enter your name', 'error');
@@ -466,6 +589,12 @@ class LANternApp {
             return;
         }
 
+        if (asHost && !hostKey) {
+            this.showToast('Host key is required to host a session', 'error');
+            this.hostKeyInput.focus();
+            return;
+        }
+
         try {
             await this.crypto.deriveKey(password);
             this.sessionPassword = password;
@@ -474,18 +603,26 @@ class LANternApp {
             return;
         }
 
-        this.socket.emit('register', { name, isHost: asHost, password });
+        this.socket.emit('register', { name, isHost: asHost, password, hostKey });
     }
 
     showDashboard() {
+        if (!this.landingPage) return;
+        
         this.landingPage.classList.remove('active');
         
         if (this.isHost) {
+            if (!this.hostPage) return;
             this.hostPage.classList.add('active');
-            this.hostNameEl.textContent = this.user.name;
+            if (this.hostNameEl) {
+                this.hostNameEl.textContent = this.user.name;
+            }
         } else {
+            if (!this.clientPage) return;
             this.clientPage.classList.add('active');
-            this.clientNameEl.textContent = this.user.name;
+            if (this.clientNameEl) {
+                this.clientNameEl.textContent = this.user.name;
+            }
         }
 
         // Load chat history
@@ -577,21 +714,59 @@ class LANternApp {
     updateUsersList() {
         if (!this.isHost) return;
 
-        if (this.connectedUsers.length === 0) {
-            this.usersList.innerHTML = '<p class="empty-state">No users connected yet</p>';
+        const userCount = this.connectedUsers.length;
+
+        if (userCount === 0) {
+            this.usersList.innerHTML = `
+                <div class="empty-state-card">
+                    <span class="empty-icon">👥</span>
+                    <p>Waiting for guests to join...</p>
+                    <p class="empty-hint">Share the session link with others</p>
+                </div>
+            `;
         } else {
             this.usersList.innerHTML = this.connectedUsers.map(user => `
-                <div class="user-item">
+                <div class="user-card" data-user-id="${user.id}">
                     <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
                     <div class="user-info">
                         <div class="name">${this.escapeHtml(user.name)}</div>
-                        <div class="status">● Online</div>
+                        <div class="status">🟢 Online</div>
+                    </div>
+                    <div class="user-actions">
+                        <button class="btn btn-small btn-kick" data-user-id="${user.id}" title="Remove user">🚪</button>
+                        <button class="btn btn-small btn-block" data-user-id="${user.id}" title="Block user">🚫</button>
                     </div>
                 </div>
             `).join('');
+            
+            // Add event listeners for kick and block buttons
+            this.usersList.querySelectorAll('.btn-kick').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userId = e.target.dataset.userId;
+                    const user = this.connectedUsers.find(u => u.id === userId);
+                    if (confirm(`Remove ${user?.name || 'this user'} from the session?`)) {
+                        this.socket.emit('kickUser', { userId });
+                        this.showToast(`${user?.name || 'User'} has been removed`, 'info');
+                    }
+                });
+            });
+            
+            this.usersList.querySelectorAll('.btn-block').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userId = e.target.dataset.userId;
+                    const user = this.connectedUsers.find(u => u.id === userId);
+                    if (confirm(`Block ${user?.name || 'this user'}? They won't be able to rejoin this session.`)) {
+                        this.socket.emit('blockUser', { userId });
+                        this.showToast(`${user?.name || 'User'} has been blocked`, 'warning');
+                    }
+                });
+            });
         }
 
-        this.userCount.textContent = this.connectedUsers.length;
+        // Update all user count displays
+        if (this.userCount) this.userCount.textContent = `${userCount} member${userCount !== 1 ? 's' : ''}`;
+        if (this.navUserCount) this.navUserCount.textContent = userCount;
+        if (this.statUsers) this.statUsers.textContent = userCount;
     }
 
     updateUserCheckboxes() {
@@ -967,21 +1142,30 @@ class LANternApp {
         if (this.isHost) {
             const hostFilesCount = this.hostFilesList.querySelectorAll('.file-item').length;
             const clientFilesCount = this.receivedFilesList.querySelectorAll('.file-item').length;
-            this.hostFilesCount.textContent = hostFilesCount;
-            this.clientFilesCount.textContent = clientFilesCount;
+            if (this.hostFilesCount) this.hostFilesCount.textContent = hostFilesCount;
+            if (this.clientFilesCount) this.clientFilesCount.textContent = clientFilesCount;
+            // Update stats
+            if (this.statFiles) this.statFiles.textContent = hostFilesCount + clientFilesCount;
         } else {
             const availableCount = this.availableFilesList.querySelectorAll('.file-item').length;
-            this.availableFilesCount.textContent = availableCount;
+            if (this.availableFilesCount) this.availableFilesCount.textContent = availableCount;
+            // Update stats
+            if (this.clientStatFiles) this.clientStatFiles.textContent = availableCount;
         }
     }
 
     updateTextsCount() {
         if (this.isHost) {
             const receivedCount = this.hostReceivedTexts.querySelectorAll('.text-item').length;
-            this.hostReceivedTextsCount.textContent = receivedCount;
+            const sharedCount = this.hostSharedTexts.querySelectorAll('.text-item').length;
+            if (this.hostReceivedTextsCount) this.hostReceivedTextsCount.textContent = receivedCount;
+            // Update stats
+            if (this.statMessages) this.statMessages.textContent = receivedCount + sharedCount;
         } else {
             const receivedCount = this.clientReceivedTexts.querySelectorAll('.text-item').length;
-            this.receivedTextsCount.textContent = receivedCount;
+            if (this.receivedTextsCount) this.receivedTextsCount.textContent = receivedCount;
+            // Update stats
+            if (this.clientStatMessages) this.clientStatMessages.textContent = receivedCount;
         }
     }
 

@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LANtern - LAN File Sharing</title>
+    <title>LANtern - Local File Sharing & Community</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏮</text></svg>">
 </head>
 <body>
     <!-- Landing Page -->
@@ -17,31 +18,32 @@
                 <span class="logo-icon">🏮</span>
                 <h1>LANtern</h1>
             </div>
-            <p class="tagline">Share files locally, without the internet</p>
+            <p class="tagline">Connect, share, and collaborate on your local network</p>
             
             <div class="join-form">
-                <input type="text" id="username" placeholder="Enter your name" maxlength="30" required>
-                <input type="password" id="session-password" placeholder="Session password (required)" maxlength="50" required>
+                <input type="text" id="username" placeholder="👤 Enter your name" maxlength="30" required autocomplete="off">
+                <input type="password" id="session-password" placeholder="🔐 Session password" maxlength="50" required>
+                <input type="password" id="host-key" placeholder="👑 Host key (admin only)" maxlength="50" class="host-key-input">
                 
                 <div class="role-buttons">
                     <button id="join-as-host" class="btn btn-primary">
                         <span class="btn-icon">👑</span>
-                        Host a Session
+                        Host Session
                     </button>
                     <button id="join-as-client" class="btn btn-secondary">
-                        <span class="btn-icon">👤</span>
-                        Join as Guest
+                        <span class="btn-icon">🚀</span>
+                        Join Session
                     </button>
                 </div>
             </div>
 
             <div class="info-box">
-                <h3>How it works</h3>
+                <h3>Features</h3>
                 <ul>
-                    <li><strong>Host:</strong> Share files & text with everyone or selected users</li>
-                    <li><strong>Guest:</strong> Download host's files & upload files to host</li>
-                    <li><strong>Secure:</strong> End-to-end encrypted with session password</li>
-                    <li><strong>Limit:</strong> Max file size is 25MB</li>
+                    <li><strong>Host:</strong> Create sessions & control who joins your community</li>
+                    <li><strong>Share:</strong> Files & messages with end-to-end encryption</li>
+                    <li><strong>Chat:</strong> Real-time group conversations</li>
+                    <li><strong>Secure:</strong> No internet required, 25MB file limit</li>
                 </ul>
             </div>
         </div>
@@ -49,229 +51,466 @@
 
     <!-- Host Dashboard -->
     <div id="host-page" class="page">
-        <header class="dashboard-header">
-            <div class="header-left">
-                <span class="logo-small">🏮</span>
-                <h2>LANtern</h2>
-                <span class="role-badge host-badge">HOST</span>
-            </div>
-            <div class="header-right">
-                <span id="host-name" class="user-name"></span>
-                <button id="host-logout" class="btn btn-small btn-outline">Leave</button>
-            </div>
-        </header>
-
-        <main class="dashboard-main">
-            <div class="dashboard-grid">
-                <!-- Connected Users Panel -->
-                <section class="panel users-panel">
-                    <div class="panel-header">
-                        <h3>👥 Connected Users</h3>
-                        <span id="user-count" class="count-badge">0</span>
-                    </div>
-                    <div id="users-list" class="users-list">
-                        <p class="empty-state">No users connected yet</p>
-                    </div>
-                </section>
-
-                <!-- Text Sharing Section -->
-                <section class="panel text-panel">
-                    <div class="panel-header">
-                        <h3>💬 Share Text</h3>
-                    </div>
-                    <div class="text-share-area">
-                        <textarea id="host-text-input" placeholder="Type a message to share..." rows="3"></textarea>
-                        <div class="text-share-options">
-                            <div class="share-toggle small">
-                                <button id="text-share-all-btn" class="toggle-btn active">Everyone</button>
-                                <button id="text-share-selected-btn" class="toggle-btn">Selected</button>
-                            </div>
-                            <button id="host-send-text-btn" class="btn btn-primary btn-small">Send 🔒</button>
-                        </div>
-                        <div id="text-user-select-container" class="user-select-container hidden">
-                            <div id="text-user-checkboxes" class="user-checkboxes">
-                                <!-- User checkboxes will be added dynamically -->
-                            </div>
+        <div class="app-layout">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="host-sidebar">
+                <div class="sidebar-header">
+                    <span class="logo-icon">🏮</span>
+                    <span class="sidebar-title">LANtern</span>
+                    <button class="sidebar-close" id="host-sidebar-close">✕</button>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <button class="nav-item active" data-section="home">
+                        <span class="nav-icon">🏠</span>
+                        <span class="nav-text">Home</span>
+                    </button>
+                    <button class="nav-item" data-section="community">
+                        <span class="nav-icon">👥</span>
+                        <span class="nav-text">Community</span>
+                        <span class="nav-badge" id="nav-user-count">0</span>
+                    </button>
+                    <button class="nav-item" data-section="chat">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-text">Group Chat</span>
+                    </button>
+                    <button class="nav-item" data-section="files">
+                        <span class="nav-icon">📁</span>
+                        <span class="nav-text">Files</span>
+                    </button>
+                    <button class="nav-item" data-section="messages">
+                        <span class="nav-icon">✉️</span>
+                        <span class="nav-text">Messages</span>
+                    </button>
+                </nav>
+                
+                <div class="sidebar-footer">
+                    <div class="user-profile">
+                        <div class="user-avatar">👑</div>
+                        <div class="user-info">
+                            <span id="host-name" class="user-name">Host</span>
+                            <span class="user-role">Administrator</span>
                         </div>
                     </div>
-                    <div id="host-shared-texts" class="shared-texts-list">
-                        <p class="empty-state">No messages shared yet</p>
+                    <button id="host-logout" class="btn btn-logout">
+                        <span>🚪</span> Leave Session
+                    </button>
+                </div>
+            </aside>
+            
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Top Bar -->
+                <header class="topbar">
+                    <button class="hamburger" id="host-hamburger">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </button>
+                    <h1 class="page-title" id="host-page-title">Home</h1>
+                    <div class="topbar-actions">
+                        <span class="connection-status">🟢 Connected</span>
                     </div>
-                </section>
-
-                <!-- Upload Section -->
-                <section class="panel upload-panel">
-                    <div class="panel-header">
-                        <h3>📤 Share Files</h3>
-                    </div>
-                    <div class="upload-area" id="host-upload-area">
-                        <div class="upload-dropzone" id="host-dropzone">
-                            <span class="upload-icon">📁</span>
-                            <p>Drag & drop files here</p>
-                            <p class="upload-hint">or click to browse (max 25MB)</p>
-                            <input type="file" id="host-file-input" multiple hidden>
+                </header>
+                
+                <!-- Content Sections -->
+                <div class="content-wrapper">
+                    <!-- Home Section -->
+                    <section class="content-section active" id="host-section-home">
+                        <div class="welcome-card">
+                            <div class="welcome-icon">👋</div>
+                            <h2>Welcome to LANtern</h2>
+                            <p>Your secure local file sharing hub is ready. Start by sharing files or chatting with your community.</p>
                         </div>
                         
-                        <div class="share-options">
-                            <label class="share-label">Share with:</label>
-                            <div class="share-toggle">
-                                <button id="share-all-btn" class="toggle-btn active">Everyone</button>
-                                <button id="share-selected-btn" class="toggle-btn">Selected Users</button>
+                        <div class="quick-stats">
+                            <div class="stat-card">
+                                <span class="stat-icon">👥</span>
+                                <div class="stat-info">
+                                    <span class="stat-value" id="stat-users">0</span>
+                                    <span class="stat-label">Connected Users</span>
+                                </div>
                             </div>
-                            <div id="user-select-container" class="user-select-container hidden">
-                                <div id="user-checkboxes" class="user-checkboxes">
-                                    <!-- User checkboxes will be added dynamically -->
+                            <div class="stat-card">
+                                <span class="stat-icon">📁</span>
+                                <div class="stat-info">
+                                    <span class="stat-value" id="stat-files">0</span>
+                                    <span class="stat-label">Files Shared</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-icon">💬</span>
+                                <div class="stat-info">
+                                    <span class="stat-value" id="stat-messages">0</span>
+                                    <span class="stat-label">Messages</span>
                                 </div>
                             </div>
                         </div>
                         
-                        <button id="host-upload-btn" class="btn btn-primary btn-full" disabled>
-                            🔒 Upload & Share (Encrypted)
-                        </button>
-                    </div>
-                </section>
-
-                <!-- My Shared Files -->
-                <section class="panel files-panel">
-                    <div class="panel-header">
-                        <h3>📂 My Shared Files</h3>
-                        <div class="header-actions">
-                            <button id="host-download-all-btn" class="btn btn-small btn-outline" title="Download all as ZIP">📦 Download All</button>
-                            <span id="host-files-count" class="count-badge">0</span>
+                        <div class="quick-actions">
+                            <h3>Quick Actions</h3>
+                            <div class="action-buttons">
+                                <button class="action-btn" data-goto="files">
+                                    <span class="action-icon">📤</span>
+                                    <span>Share Files</span>
+                                </button>
+                                <button class="action-btn" data-goto="chat">
+                                    <span class="action-icon">💬</span>
+                                    <span>Open Chat</span>
+                                </button>
+                                <button class="action-btn" data-goto="messages">
+                                    <span class="action-icon">✉️</span>
+                                    <span>Broadcast</span>
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                    <div id="host-files-list" class="files-list">
-                        <p class="empty-state">No files shared yet</p>
-                    </div>
-                </section>
-
-                <!-- Received Texts from Clients -->
-                <section class="panel text-panel">
-                    <div class="panel-header">
-                        <h3>💬 Received Messages</h3>
-                        <span id="host-received-texts-count" class="count-badge">0</span>
-                    </div>
-                    <div id="host-received-texts" class="shared-texts-list">
-                        <p class="empty-state">No messages received yet</p>
-                    </div>
-                </section>
-
-                <!-- Received Files from Clients -->
-                <section class="panel files-panel">
-                    <div class="panel-header">
-                        <h3>📥 Received Files</h3>
-                        <div class="header-actions">
-                            <button id="host-download-client-files-btn" class="btn btn-small btn-outline" title="Download all as ZIP">📦 Download All</button>
-                            <span id="client-files-count" class="count-badge">0</span>
+                    </section>
+                    
+                    <!-- Community Section -->
+                    <section class="content-section" id="host-section-community">
+                        <div class="section-header">
+                            <h2>Community Members</h2>
+                            <span id="user-count" class="count-badge">0 members</span>
                         </div>
-                    </div>
-                    <div id="received-files-list" class="files-list">
-                        <p class="empty-state">No files received yet</p>
-                    </div>
-                </section>
-
-                <!-- Chat Panel -->
-                <section class="panel chat-panel">
-                    <div class="panel-header">
-                        <h3>💬 Group Chat</h3>
-                    </div>
-                    <div id="host-chat-messages" class="chat-messages">
-                        <p class="chat-empty">No messages yet. Start the conversation!</p>
-                    </div>
-                    <div class="chat-input-area">
-                        <input type="text" id="host-chat-input" placeholder="Type a message..." maxlength="500">
-                        <button id="host-chat-send" class="btn btn-primary btn-small">Send</button>
-                    </div>
-                </section>
-            </div>
-        </main>
+                        <div id="users-list" class="users-grid">
+                            <div class="empty-state-card">
+                                <span class="empty-icon">👥</span>
+                                <p>Waiting for guests to join...</p>
+                                <p class="empty-hint">Share the session link with others</p>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Chat Section -->
+                    <section class="content-section" id="host-section-chat">
+                        <div class="chat-container">
+                            <div class="chat-header">
+                                <h2>💬 Community Chat</h2>
+                                <span class="chat-status">Live</span>
+                            </div>
+                            <div id="host-chat-messages" class="chat-messages">
+                                <div class="chat-welcome">
+                                    <span>🎉</span>
+                                    <p>Welcome to the community chat! Start a conversation.</p>
+                                </div>
+                            </div>
+                            <div class="chat-input-area">
+                                <input type="text" id="host-chat-input" placeholder="Type a message..." maxlength="500">
+                                <button id="host-chat-send" class="btn btn-primary">
+                                    <span>Send</span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Files Section -->
+                    <section class="content-section" id="host-section-files">
+                        <div class="files-layout">
+                            <!-- Upload Area -->
+                            <div class="upload-card">
+                                <h3>📤 Share New Files</h3>
+                                <div class="upload-dropzone" id="host-dropzone">
+                                    <span class="upload-icon">☁️</span>
+                                    <p>Drop files here to share</p>
+                                    <p class="upload-hint">or click to browse • max 25MB</p>
+                                    <input type="file" id="host-file-input" multiple hidden>
+                                </div>
+                                
+                                <div class="share-options">
+                                    <label class="share-label">Share with:</label>
+                                    <div class="share-toggle">
+                                        <button id="share-all-btn" class="toggle-btn active">Everyone</button>
+                                        <button id="share-selected-btn" class="toggle-btn">Selected</button>
+                                    </div>
+                                    <div id="user-select-container" class="user-select-container hidden">
+                                        <div id="user-checkboxes" class="user-checkboxes"></div>
+                                    </div>
+                                </div>
+                                
+                                <button id="host-upload-btn" class="btn btn-primary btn-full" disabled>
+                                    🔒 Upload Encrypted
+                                </button>
+                            </div>
+                            
+                            <!-- Shared Files -->
+                            <div class="files-card">
+                                <div class="files-card-header">
+                                    <h3>📁 My Shared Files</h3>
+                                    <div class="files-actions">
+                                        <button id="host-download-all-btn" class="btn btn-small btn-outline">📦 Download All</button>
+                                        <span id="host-files-count" class="count-badge">0</span>
+                                    </div>
+                                </div>
+                                <div id="host-files-list" class="files-list">
+                                    <div class="empty-state-card small">
+                                        <span class="empty-icon">📁</span>
+                                        <p>No files shared yet</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Received Files -->
+                            <div class="files-card">
+                                <div class="files-card-header">
+                                    <h3>📥 Received from Users</h3>
+                                    <div class="files-actions">
+                                        <button id="host-download-client-files-btn" class="btn btn-small btn-outline">📦 Download All</button>
+                                        <span id="client-files-count" class="count-badge">0</span>
+                                    </div>
+                                </div>
+                                <div id="received-files-list" class="files-list">
+                                    <div class="empty-state-card small">
+                                        <span class="empty-icon">📥</span>
+                                        <p>No files received</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Messages Section -->
+                    <section class="content-section" id="host-section-messages">
+                        <div class="messages-layout">
+                            <!-- Broadcast -->
+                            <div class="message-card">
+                                <h3>📢 Broadcast Message</h3>
+                                <div class="text-share-area">
+                                    <textarea id="host-text-input" placeholder="Type a message to broadcast to all users..." rows="4"></textarea>
+                                    <div class="text-share-options">
+                                        <div class="share-toggle small">
+                                            <button id="text-share-all-btn" class="toggle-btn active">Everyone</button>
+                                            <button id="text-share-selected-btn" class="toggle-btn">Selected</button>
+                                        </div>
+                                        <button id="host-send-text-btn" class="btn btn-primary">Send 🔒</button>
+                                    </div>
+                                    <div id="text-user-select-container" class="user-select-container hidden">
+                                        <div id="text-user-checkboxes" class="user-checkboxes"></div>
+                                    </div>
+                                </div>
+                                <div id="host-shared-texts" class="shared-texts-list">
+                                    <p class="empty-state">No broadcasts sent yet</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Inbox -->
+                            <div class="message-card">
+                                <div class="message-card-header">
+                                    <h3>📨 Inbox</h3>
+                                    <span id="host-received-texts-count" class="count-badge">0</span>
+                                </div>
+                                <div id="host-received-texts" class="shared-texts-list">
+                                    <div class="empty-state-card small">
+                                        <span class="empty-icon">📨</span>
+                                        <p>No messages received</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+        
+        <!-- Sidebar Overlay -->
+        <div class="sidebar-overlay" id="host-sidebar-overlay"></div>
     </div>
 
     <!-- Client Dashboard -->
     <div id="client-page" class="page">
-        <header class="dashboard-header">
-            <div class="header-left">
-                <span class="logo-small">🏮</span>
-                <h2>LANtern</h2>
-                <span class="role-badge client-badge">GUEST</span>
-            </div>
-            <div class="header-right">
-                <span id="client-name" class="user-name"></span>
-                <button id="client-logout" class="btn btn-small btn-outline">Leave</button>
-            </div>
-        </header>
-
-        <main class="dashboard-main">
-            <div class="dashboard-grid client-grid">
-                <!-- Text to Host -->
-                <section class="panel text-panel">
-                    <div class="panel-header">
-                        <h3>💬 Send Text to Host</h3>
-                    </div>
-                    <div class="text-share-area">
-                        <textarea id="client-text-input" placeholder="Type a message for the host..." rows="3"></textarea>
-                        <button id="client-send-text-btn" class="btn btn-primary btn-full btn-small">Send to Host 🔒</button>
-                    </div>
-                </section>
-
-                <!-- Upload to Host -->
-                <section class="panel upload-panel">
-                    <div class="panel-header">
-                        <h3>📤 Send Files to Host</h3>
-                    </div>
-                    <div class="upload-area" id="client-upload-area">
-                        <div class="upload-dropzone" id="client-dropzone">
-                            <span class="upload-icon">📁</span>
-                            <p>Drag & drop files here</p>
-                            <p class="upload-hint">or click to browse (max 25MB)</p>
-                            <input type="file" id="client-file-input" multiple hidden>
-                        </div>
-                        <button id="client-upload-btn" class="btn btn-primary btn-full" disabled>
-                            🔒 Send to Host (Encrypted)
-                        </button>
-                    </div>
-                </section>
-
-                <!-- Received Texts from Host -->
-                <section class="panel text-panel">
-                    <div class="panel-header">
-                        <h3>💬 Messages from Host</h3>
-                        <span id="received-texts-count" class="count-badge">0</span>
-                    </div>
-                    <div id="client-received-texts" class="shared-texts-list">
-                        <p class="empty-state">No messages received yet</p>
-                    </div>
-                </section>
-
-                <!-- Available Files from Host -->
-                <section class="panel files-panel">
-                    <div class="panel-header">
-                        <h3>📥 Available Downloads</h3>
-                        <div class="header-actions">
-                            <button id="client-download-all-btn" class="btn btn-small btn-outline" title="Download all as ZIP">📦 Download All</button>
-                            <span id="available-files-count" class="count-badge">0</span>
+        <div class="app-layout">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="client-sidebar">
+                <div class="sidebar-header">
+                    <span class="logo-icon">🏮</span>
+                    <span class="sidebar-title">LANtern</span>
+                    <button class="sidebar-close" id="client-sidebar-close">✕</button>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <button class="nav-item active" data-section="home">
+                        <span class="nav-icon">🏠</span>
+                        <span class="nav-text">Home</span>
+                    </button>
+                    <button class="nav-item" data-section="chat">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-text">Group Chat</span>
+                    </button>
+                    <button class="nav-item" data-section="files">
+                        <span class="nav-icon">📁</span>
+                        <span class="nav-text">Files</span>
+                    </button>
+                    <button class="nav-item" data-section="messages">
+                        <span class="nav-icon">✉️</span>
+                        <span class="nav-text">Messages</span>
+                    </button>
+                </nav>
+                
+                <div class="sidebar-footer">
+                    <div class="user-profile">
+                        <div class="user-avatar">🙂</div>
+                        <div class="user-info">
+                            <span id="client-name" class="user-name">Guest</span>
+                            <span class="user-role">Member</span>
                         </div>
                     </div>
-                    <div id="available-files-list" class="files-list">
-                        <p class="empty-state">No files available for download</p>
+                    <button id="client-logout" class="btn btn-logout">
+                        <span>🚪</span> Leave Session
+                    </button>
+                </div>
+            </aside>
+            
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Top Bar -->
+                <header class="topbar">
+                    <button class="hamburger" id="client-hamburger">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </button>
+                    <h1 class="page-title" id="client-page-title">Home</h1>
+                    <div class="topbar-actions">
+                        <span class="connection-status">🟢 Connected</span>
                     </div>
-                </section>
-
-                <!-- Chat Panel -->
-                <section class="panel chat-panel">
-                    <div class="panel-header">
-                        <h3>💬 Group Chat</h3>
-                    </div>
-                    <div id="client-chat-messages" class="chat-messages">
-                        <p class="chat-empty">No messages yet. Start the conversation!</p>
-                    </div>
-                    <div class="chat-input-area">
-                        <input type="text" id="client-chat-input" placeholder="Type a message..." maxlength="500">
-                        <button id="client-chat-send" class="btn btn-primary btn-small">Send</button>
-                    </div>
-                </section>
-            </div>
-        </main>
+                </header>
+                
+                <!-- Content Sections -->
+                <div class="content-wrapper">
+                    <!-- Home Section -->
+                    <section class="content-section active" id="client-section-home">
+                        <div class="welcome-card">
+                            <div class="welcome-icon">👋</div>
+                            <h2>Welcome to the Session</h2>
+                            <p>You're connected! Browse available files or join the community chat.</p>
+                        </div>
+                        
+                        <div class="quick-stats">
+                            <div class="stat-card">
+                                <span class="stat-icon">📁</span>
+                                <div class="stat-info">
+                                    <span class="stat-value" id="client-stat-files">0</span>
+                                    <span class="stat-label">Files Available</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-icon">✉️</span>
+                                <div class="stat-info">
+                                    <span class="stat-value" id="client-stat-messages">0</span>
+                                    <span class="stat-label">Messages</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="quick-actions">
+                            <h3>Quick Actions</h3>
+                            <div class="action-buttons">
+                                <button class="action-btn" data-goto="files">
+                                    <span class="action-icon">📥</span>
+                                    <span>Browse Files</span>
+                                </button>
+                                <button class="action-btn" data-goto="chat">
+                                    <span class="action-icon">💬</span>
+                                    <span>Join Chat</span>
+                                </button>
+                                <button class="action-btn" data-goto="messages">
+                                    <span class="action-icon">✉️</span>
+                                    <span>Messages</span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Chat Section -->
+                    <section class="content-section" id="client-section-chat">
+                        <div class="chat-container">
+                            <div class="chat-header">
+                                <h2>💬 Community Chat</h2>
+                                <span class="chat-status">Live</span>
+                            </div>
+                            <div id="client-chat-messages" class="chat-messages">
+                                <div class="chat-welcome">
+                                    <span>🎉</span>
+                                    <p>Welcome to the community chat! Join the conversation.</p>
+                                </div>
+                            </div>
+                            <div class="chat-input-area">
+                                <input type="text" id="client-chat-input" placeholder="Type a message..." maxlength="500">
+                                <button id="client-chat-send" class="btn btn-primary">
+                                    <span>Send</span>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Files Section -->
+                    <section class="content-section" id="client-section-files">
+                        <div class="files-layout">
+                            <!-- Send Files -->
+                            <div class="upload-card">
+                                <h3>📤 Send Files to Host</h3>
+                                <div class="upload-dropzone" id="client-dropzone">
+                                    <span class="upload-icon">☁️</span>
+                                    <p>Drop files here</p>
+                                    <p class="upload-hint">or click to browse • max 25MB</p>
+                                    <input type="file" id="client-file-input" multiple hidden>
+                                </div>
+                                <button id="client-upload-btn" class="btn btn-primary btn-full" disabled>
+                                    🔒 Send Encrypted
+                                </button>
+                            </div>
+                            
+                            <!-- Available Files -->
+                            <div class="files-card full-width">
+                                <div class="files-card-header">
+                                    <h3>📥 Available Downloads</h3>
+                                    <div class="files-actions">
+                                        <button id="client-download-all-btn" class="btn btn-small btn-outline">📦 Download All</button>
+                                        <span id="available-files-count" class="count-badge">0</span>
+                                    </div>
+                                </div>
+                                <div id="available-files-list" class="files-list">
+                                    <div class="empty-state-card small">
+                                        <span class="empty-icon">📥</span>
+                                        <p>No files available yet</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Messages Section -->
+                    <section class="content-section" id="client-section-messages">
+                        <div class="messages-layout">
+                            <!-- Send to Host -->
+                            <div class="message-card">
+                                <h3>✉️ Message to Host</h3>
+                                <div class="text-share-area">
+                                    <textarea id="client-text-input" placeholder="Send a private message to the host..." rows="4"></textarea>
+                                    <button id="client-send-text-btn" class="btn btn-primary btn-full">Send to Host 🔒</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Received from Host -->
+                            <div class="message-card">
+                                <div class="message-card-header">
+                                    <h3>📨 Messages from Host</h3>
+                                    <span id="received-texts-count" class="count-badge">0</span>
+                                </div>
+                                <div id="client-received-texts" class="shared-texts-list">
+                                    <div class="empty-state-card small">
+                                        <span class="empty-icon">📨</span>
+                                        <p>No messages from host yet</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+        
+        <!-- Sidebar Overlay -->
+        <div class="sidebar-overlay" id="client-sidebar-overlay"></div>
     </div>
 
     <!-- Toast Notifications -->
