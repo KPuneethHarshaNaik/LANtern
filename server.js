@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const multer = require('multer');
 const path = require('path');
@@ -8,8 +9,77 @@ const { v4: uuidv4 } = require('uuid');
 const os = require('os');
 const archiver = require('archiver');
 
+// Generate self-signed certificate for HTTPS (required for Web Crypto API over network)
+const { execSync } = require('child_process');
+
+const certDir = path.join(__dirname, 'certs');
+const keyPath = path.join(certDir, 'key.pem');
+const certPath = path.join(certDir, 'cert.pem');
+
+function generateSelfSignedCert() {
+    if (!fs.existsSync(certDir)) {
+        fs.mkdirSync(certDir, { recursive: true });
+    }
+    
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+        console.log('Generating self-signed certificate for HTTPS...');
+        try {
+            // Try using OpenSSL if available
+            execSync(`openssl req -x509 -newkey rsa:2048 -keyout "${keyPath}" -out "${certPath}" -days 365 -nodes -subj "/CN=LANtern"`, { stdio: 'pipe' });
+            console.log('Certificate generated successfully!');
+            return true;
+        } catch (err) {
+            console.log('OpenSSL not available, using built-in certificate generation...');
+            // Fallback: create simple self-signed cert using Node.js crypto
+            try {
+                const { generateKeyPairSync, createSign } = require('crypto');
+                const forge = require('node-forge');
+                
+                const keys = forge.pki.rsa.generateKeyPair(2048);
+                const cert = forge.pki.createCertificate();
+                
+                cert.publicKey = keys.publicKey;
+                cert.serialNumber = '01';
+                cert.validity.notBefore = new Date();
+                cert.validity.notAfter = new Date();
+                cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
+                
+                const attrs = [{ name: 'commonName', value: 'LANtern' }];
+                cert.setSubject(attrs);
+                cert.setIssuer(attrs);
+                cert.sign(keys.privateKey);
+                
+                fs.writeFileSync(keyPath, forge.pki.privateKeyToPem(keys.privateKey));
+                fs.writeFileSync(certPath, forge.pki.certificateToPem(cert));
+                console.log('Certificate generated successfully using node-forge!');
+                return true;
+            } catch (forgeErr) {
+                console.log('node-forge not available. HTTPS disabled.');
+                console.log('Install node-forge for HTTPS support: npm install node-forge');
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+const httpsAvailable = generateSelfSignedCert();
+
 const app = express();
-const server = http.createServer(app);
+
+let server;
+let httpsServer;
+if (httpsAvailable && fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+    const httpsOptions = {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath)
+    };
+    httpsServer = https.createServer(httpsOptions, app);
+    server = httpsServer;
+} else {
+    server = http.createServer(app);
+}
+
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
@@ -526,15 +596,25 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start server
 server.listen(PORT, '0.0.0.0', () => {
     const ips = getLocalIPs();
+    const protocol = httpsServer ? 'https' : 'http';
     console.log('\n========================================');
     console.log('   🏮 LANtern - LAN File Sharing');
     console.log('========================================\n');
     console.log(`Server running on port ${PORT}\n`);
     console.log('Access the application at:');
-    console.log(`  Local:    http://localhost:${PORT}`);
+    console.log(`  Local:    ${protocol}://localhost:${PORT}`);
     ips.forEach(ip => {
-        console.log(`  Network:  http://${ip}:${PORT}`);
+        console.log(`  Network:  ${protocol}://${ip}:${PORT}`);
     });
+    if (httpsServer) {
+        console.log('\n⚠️  Note: You will see a certificate warning in browsers.');
+        console.log('   Click "Advanced" → "Proceed" to continue.');
+        console.log('   This is normal for self-signed certificates.');
+    } else {
+        console.log('\n⚠️  Warning: Running in HTTP mode.');
+        console.log('   Encryption may not work over network (non-localhost).');
+        console.log('   Install OpenSSL or node-forge for HTTPS support.');
+    }
     console.log('\nShare the Network URL with others on the same WiFi!');
     console.log('========================================\n');
 });
