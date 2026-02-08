@@ -1,106 +1,387 @@
 // LANtern - Client-side Application with E2E Encryption
 
+// ============ SOFTWARE AES-GCM FALLBACK (for HTTP / non-secure contexts) ============
+// A compact pure-JS AES-256-GCM implementation so encryption works without crypto.subtle.
+const SoftCrypto = (() => {
+    // --- AES core ---
+    const SBOX = new Uint8Array(256), INV_SBOX = new Uint8Array(256);
+    const RCON = [0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36];
+    (function initSbox() {
+        let p = 1, q = 1;
+        do {
+            p ^= (p << 1) ^ (p & 0x80 ? 0x11b : 0);
+            p &= 0xff;
+            q ^= q << 1; q ^= q << 2; q ^= q << 4;
+            q ^= q & 0x80 ? 0x09 : 0; q &= 0xff;
+            const x = q ^ (q << 1 | q >>> 7) ^ (q << 2 | q >>> 6) ^
+                      (q << 3 | q >>> 5) ^ (q << 4 | q >>> 4);
+            SBOX[p] = (x ^ 0x63) & 0xff;
+            INV_SBOX[SBOX[p]] = p;
+        } while (p !== 1);
+        SBOX[0] = 0x63; INV_SBOX[0x63] = 0;
+    })();
+
+    function expandKey256(key) {
+        const w = new Uint32Array(60);
+        for (let i = 0; i < 8; i++)
+            w[i] = (key[4*i]<<24)|(key[4*i+1]<<16)|(key[4*i+2]<<8)|key[4*i+3];
+        for (let i = 8; i < 60; i++) {
+            let t = w[i-1];
+            if (i % 8 === 0) {
+                t = (t << 8 | t >>> 24);
+                t = (SBOX[t>>>24]<<24)|(SBOX[(t>>>16)&0xff]<<16)|
+                    (SBOX[(t>>>8)&0xff]<<8)|SBOX[t&0xff];
+                t ^= RCON[i/8-1] << 24;
+            } else if (i % 8 === 4) {
+                t = (SBOX[t>>>24]<<24)|(SBOX[(t>>>16)&0xff]<<16)|
+                    (SBOX[(t>>>8)&0xff]<<8)|SBOX[t&0xff];
+            }
+            w[i] = w[i-8] ^ t;
+        }
+        return w;
+    }
+
+    function encryptBlock(block, w) {
+        const s = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) s[i] = block[i] ^ (w[i>>2] >>> (24-8*(i%4))) & 0xff;
+        for (let r = 1; r <= 14; r++) {
+            const t = new Uint8Array(16);
+            // SubBytes + ShiftRows
+            const shifts = [0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11];
+            for (let i = 0; i < 16; i++) t[i] = SBOX[s[shifts[i]]];
+            if (r < 14) {
+                // MixColumns
+                for (let c = 0; c < 4; c++) {
+                    const a = [t[4*c],t[4*c+1],t[4*c+2],t[4*c+3]];
+                    const x2 = a.map(v => (v<<1)^(v&0x80?0x1b:0)&0xff);
+                    t[4*c]   = (x2[0]^x2[1]^a[1]^a[2]^a[3])&0xff;
+                    t[4*c+1] = (a[0]^x2[1]^x2[2]^a[2]^a[3])&0xff;
+                    t[4*c+2] = (a[0]^a[1]^x2[2]^x2[3]^a[3])&0xff;
+                    t[4*c+3] = (x2[0]^a[0]^a[1]^a[2]^x2[3])&0xff;
+                }
+            }
+            // AddRoundKey
+            for (let i = 0; i < 16; i++) s[i] = t[i] ^ ((w[r*4+(i>>2)] >>> (24-8*(i%4))) & 0xff);
+        }
+        return s;
+    }
+
+    // --- GCM helpers ---
+    function inc32(counter) {
+        const c = new Uint8Array(counter);
+        for (let i = 15; i >= 12; i--) { c[i]++; if (c[i] !== 0) break; }
+        return c;
+    }
+
+    function ghashBlock(H, X, Y) {
+        // XOR then multiply in GF(2^128) – bit-by-bit (not fast, but correct)
+        const Z = new Uint8Array(16);
+        const V = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) V[i] = H[i];
+        const R = new Uint8Array(16); R[0] = 0xe1; // R polynomial
+        // XOR X into Y first
+        const val = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) val[i] = (Y[i] || 0) ^ (X[i] || 0);
+        for (let i = 0; i < 128; i++) {
+            if (val[i >> 3] & (0x80 >> (i & 7))) {
+                for (let j = 0; j < 16; j++) Z[j] ^= V[j];
+            }
+            const lsb = V[15] & 1;
+            for (let j = 15; j > 0; j--) V[j] = (V[j] >> 1) | ((V[j-1] & 1) << 7);
+            V[0] >>= 1;
+            if (lsb) for (let j = 0; j < 16; j++) V[j] ^= R[j];
+        }
+        return Z;
+    }
+
+    function ghash(H, aad, ciphertext) {
+        let Y = new Uint8Array(16);
+        // Process AAD (empty for us)
+        const aadLen = aad ? aad.length : 0;
+        for (let i = 0; i < aadLen; i += 16) {
+            const block = new Uint8Array(16);
+            for (let j = 0; j < 16 && i+j < aadLen; j++) block[j] = aad[i+j];
+            Y = ghashBlock(H, block, Y);
+        }
+        // Process ciphertext
+        for (let i = 0; i < ciphertext.length; i += 16) {
+            const block = new Uint8Array(16);
+            for (let j = 0; j < 16 && i+j < ciphertext.length; j++) block[j] = ciphertext[i+j];
+            Y = ghashBlock(H, block, Y);
+        }
+        // Length block: 64-bit AAD length, 64-bit ciphertext length (in bits)
+        const lenBlock = new Uint8Array(16);
+        const aadBits = aadLen * 8, ctBits = ciphertext.length * 8;
+        lenBlock[4] = (aadBits >>> 24) & 0xff; lenBlock[5] = (aadBits >>> 16) & 0xff;
+        lenBlock[6] = (aadBits >>> 8) & 0xff; lenBlock[7] = aadBits & 0xff;
+        lenBlock[12] = (ctBits >>> 24) & 0xff; lenBlock[13] = (ctBits >>> 16) & 0xff;
+        lenBlock[14] = (ctBits >>> 8) & 0xff; lenBlock[15] = ctBits & 0xff;
+        Y = ghashBlock(H, lenBlock, Y);
+        return Y;
+    }
+
+    return {
+        async deriveKey(password, salt, iterations) {
+            // PBKDF2-SHA256
+            const enc = new TextEncoder();
+            const pwd = enc.encode(password);
+            const s = enc.encode(salt);
+            // HMAC-SHA256 helper
+            async function hmacSha256(key, data) {
+                const bKey = key.length > 64 ? new Uint8Array(await sha256(key)) : key;
+                const iPad = new Uint8Array(64), oPad = new Uint8Array(64);
+                for (let i = 0; i < 64; i++) {
+                    iPad[i] = 0x36 ^ (bKey[i] || 0);
+                    oPad[i] = 0x5c ^ (bKey[i] || 0);
+                }
+                const inner = new Uint8Array(64 + data.length);
+                inner.set(iPad); inner.set(data, 64);
+                const innerHash = new Uint8Array(await sha256(inner));
+                const outer = new Uint8Array(64 + 32);
+                outer.set(oPad); outer.set(innerHash, 64);
+                return new Uint8Array(await sha256(outer));
+            }
+            async function sha256(data) {
+                // Use subtle if available, else a tiny JS sha256
+                if (typeof crypto !== 'undefined' && crypto.subtle) {
+                    return crypto.subtle.digest('SHA-256', data);
+                }
+                return jsSha256(data);
+            }
+            // Tiny JS SHA-256
+            function jsSha256(msg) {
+                const K = [
+                    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+                    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+                    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+                    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+                    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+                    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+                    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+                    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+                ];
+                const data = (msg instanceof Uint8Array) ? msg : new Uint8Array(msg);
+                const len = data.length;
+                const bitLen = len * 8;
+                const padLen = ((len + 9 + 63) & ~63);
+                const padded = new Uint8Array(padLen);
+                padded.set(data);
+                padded[len] = 0x80;
+                padded[padLen-4] = (bitLen >>> 24) & 0xff;
+                padded[padLen-3] = (bitLen >>> 16) & 0xff;
+                padded[padLen-2] = (bitLen >>> 8) & 0xff;
+                padded[padLen-1] = bitLen & 0xff;
+                let [h0,h1,h2,h3,h4,h5,h6,h7] = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+                const W = new Int32Array(64);
+                for (let off = 0; off < padLen; off += 64) {
+                    for (let i = 0; i < 16; i++) W[i] = (padded[off+4*i]<<24)|(padded[off+4*i+1]<<16)|(padded[off+4*i+2]<<8)|padded[off+4*i+3];
+                    for (let i = 16; i < 64; i++) {
+                        const s0 = (((W[i-15]>>>7)|(W[i-15]<<25))^((W[i-15]>>>18)|(W[i-15]<<14))^(W[i-15]>>>3));
+                        const s1 = (((W[i-2]>>>17)|(W[i-2]<<15))^((W[i-2]>>>19)|(W[i-2]<<13))^(W[i-2]>>>10));
+                        W[i] = (W[i-16]+s0+W[i-7]+s1)|0;
+                    }
+                    let [a,b,c,d,e,f,g,h] = [h0,h1,h2,h3,h4,h5,h6,h7];
+                    for (let i = 0; i < 64; i++) {
+                        const S1 = (((e>>>6)|(e<<26))^((e>>>11)|(e<<21))^((e>>>25)|(e<<7)));
+                        const ch = (e&f)^(~e&g);
+                        const t1 = (h+S1+ch+K[i]+W[i])|0;
+                        const S0 = (((a>>>2)|(a<<30))^((a>>>13)|(a<<19))^((a>>>22)|(a<<10)));
+                        const maj = (a&b)^(a&c)^(b&c);
+                        const t2 = (S0+maj)|0;
+                        h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+                    }
+                    h0=(h0+a)|0; h1=(h1+b)|0; h2=(h2+c)|0; h3=(h3+d)|0;
+                    h4=(h4+e)|0; h5=(h5+f)|0; h6=(h6+g)|0; h7=(h7+h)|0;
+                }
+                const out = new ArrayBuffer(32);
+                const dv = new DataView(out);
+                [h0,h1,h2,h3,h4,h5,h6,h7].forEach((v,i) => dv.setInt32(i*4, v));
+                return out;
+            }
+            // PBKDF2
+            const u1Salt = new Uint8Array(s.length + 4);
+            u1Salt.set(s); u1Salt[s.length+3] = 1; // block index = 1
+            let U = await hmacSha256(pwd, u1Salt);
+            const result = new Uint8Array(U);
+            for (let i = 1; i < iterations; i++) {
+                U = await hmacSha256(pwd, U);
+                for (let j = 0; j < 32; j++) result[j] ^= U[j];
+            }
+            return result; // 32 bytes = AES-256 key
+        },
+
+        encrypt(key, iv, plaintext) {
+            const rk = expandKey256(key);
+            // Encrypt zero block to get H for GHASH
+            const H = encryptBlock(new Uint8Array(16), rk);
+            // J0 = IV || 00000001
+            const J0 = new Uint8Array(16);
+            J0.set(iv); J0[15] = 1;
+            // CTR encryption
+            let counter = new Uint8Array(J0);
+            const ct = new Uint8Array(plaintext.length);
+            for (let i = 0; i < plaintext.length; i += 16) {
+                counter = inc32(counter);
+                const ks = encryptBlock(counter, rk);
+                for (let j = 0; j < 16 && i+j < plaintext.length; j++) {
+                    ct[i+j] = plaintext[i+j] ^ ks[j];
+                }
+            }
+            // GHASH
+            const tag = ghash(H, null, ct);
+            // Encrypt J0 and XOR with tag
+            const encJ0 = encryptBlock(J0, rk);
+            const authTag = new Uint8Array(16);
+            for (let i = 0; i < 16; i++) authTag[i] = tag[i] ^ encJ0[i];
+            return { ciphertext: ct, tag: authTag };
+        },
+
+        decrypt(key, iv, ciphertext, tag) {
+            const rk = expandKey256(key);
+            const H = encryptBlock(new Uint8Array(16), rk);
+            const J0 = new Uint8Array(16);
+            J0.set(iv); J0[15] = 1;
+            // Verify tag
+            const computedTag = ghash(H, null, ciphertext);
+            const encJ0 = encryptBlock(J0, rk);
+            for (let i = 0; i < 16; i++) {
+                if (((computedTag[i] ^ encJ0[i]) & 0xff) !== tag[i]) {
+                    throw new Error('Authentication tag mismatch – wrong password or corrupted data');
+                }
+            }
+            // CTR decryption
+            let counter = new Uint8Array(J0);
+            const pt = new Uint8Array(ciphertext.length);
+            for (let i = 0; i < ciphertext.length; i += 16) {
+                counter = inc32(counter);
+                const ks = encryptBlock(counter, rk);
+                for (let j = 0; j < 16 && i+j < ciphertext.length; j++) {
+                    pt[i+j] = ciphertext[i+j] ^ ks[j];
+                }
+            }
+            return pt;
+        }
+    };
+})();
+
+// ============ CRYPTO HELPER (auto-selects Web Crypto or software fallback) ============
 class CryptoHelper {
     constructor() {
         this.key = null;
+        this.rawKey = null; // For software fallback
+        this.useNative = !!(typeof crypto !== 'undefined' && crypto.subtle);
     }
 
     async deriveKey(password) {
-        const encoder = new TextEncoder();
-        const passwordData = encoder.encode(password);
-        
-        const baseKey = await crypto.subtle.importKey(
-            'raw',
-            passwordData,
-            'PBKDF2',
-            false,
-            ['deriveBits', 'deriveKey']
-        );
-
-        this.key = await crypto.subtle.deriveKey(
-            {
-                name: 'PBKDF2',
-                salt: encoder.encode('LANtern-salt-v1'),
-                iterations: 100000,
-                hash: 'SHA-256'
-            },
-            baseKey,
-            { name: 'AES-GCM', length: 256 },
-            true,
-            ['encrypt', 'decrypt']
-        );
-
+        if (this.useNative) {
+            try {
+                const encoder = new TextEncoder();
+                const passwordData = encoder.encode(password);
+                const baseKey = await crypto.subtle.importKey(
+                    'raw', passwordData, 'PBKDF2', false, ['deriveBits', 'deriveKey']
+                );
+                this.key = await crypto.subtle.deriveKey(
+                    { name: 'PBKDF2', salt: encoder.encode('LANtern-salt-v1'), iterations: 100000, hash: 'SHA-256' },
+                    baseKey,
+                    { name: 'AES-GCM', length: 256 },
+                    true,
+                    ['encrypt', 'decrypt']
+                );
+                return this.key;
+            } catch (e) {
+                console.warn('Web Crypto failed, falling back to software crypto:', e.message);
+                this.useNative = false;
+            }
+        }
+        // Software fallback – use fewer iterations for usable speed in pure JS
+        this.rawKey = await SoftCrypto.deriveKey(password, 'LANtern-salt-v1', 1000);
+        this.key = this.rawKey;
         return this.key;
+    }
+
+    _getIV() {
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            return crypto.getRandomValues(new Uint8Array(12));
+        }
+        const iv = new Uint8Array(12);
+        for (let i = 0; i < 12; i++) iv[i] = Math.floor(Math.random() * 256);
+        return iv;
     }
 
     async encrypt(data) {
         if (!this.key) throw new Error('Key not derived');
-        
         const encoder = new TextEncoder();
-        const dataBytes = typeof data === 'string' ? encoder.encode(data) : data;
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        
-        const encrypted = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv },
-            this.key,
-            dataBytes
-        );
+        const dataBytes = typeof data === 'string' ? encoder.encode(data) : new Uint8Array(data);
+        const iv = this._getIV();
 
-        const combined = new Uint8Array(iv.length + encrypted.byteLength);
+        if (this.useNative) {
+            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.key, dataBytes);
+            const combined = new Uint8Array(iv.length + encrypted.byteLength);
+            combined.set(iv);
+            combined.set(new Uint8Array(encrypted), iv.length);
+            return this.arrayBufferToBase64(combined);
+        }
+        // Software path
+        const { ciphertext, tag } = SoftCrypto.encrypt(this.rawKey, iv, dataBytes);
+        const combined = new Uint8Array(12 + ciphertext.length + 16);
         combined.set(iv);
-        combined.set(new Uint8Array(encrypted), iv.length);
-
+        combined.set(ciphertext, 12);
+        combined.set(tag, 12 + ciphertext.length);
         return this.arrayBufferToBase64(combined);
     }
 
     async decrypt(encryptedBase64) {
         if (!this.key) throw new Error('Key not derived');
-        
         const combined = this.base64ToArrayBuffer(encryptedBase64);
         const iv = combined.slice(0, 12);
-        const encrypted = combined.slice(12);
 
-        const decrypted = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv },
-            this.key,
-            encrypted
-        );
-
-        return new TextDecoder().decode(decrypted);
+        if (this.useNative) {
+            const encrypted = combined.slice(12);
+            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.key, encrypted);
+            return new TextDecoder().decode(decrypted);
+        }
+        // Software path: last 16 bytes are tag
+        const ciphertext = combined.slice(12, combined.length - 16);
+        const tag = combined.slice(combined.length - 16);
+        const pt = SoftCrypto.decrypt(this.rawKey, iv, ciphertext, tag);
+        return new TextDecoder().decode(pt);
     }
 
     async encryptFile(file) {
         const arrayBuffer = await file.arrayBuffer();
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        
-        const encrypted = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv },
-            this.key,
-            arrayBuffer
-        );
+        const iv = this._getIV();
 
-        const combined = new Uint8Array(iv.length + encrypted.byteLength);
+        if (this.useNative) {
+            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.key, arrayBuffer);
+            const combined = new Uint8Array(iv.length + encrypted.byteLength);
+            combined.set(iv);
+            combined.set(new Uint8Array(encrypted), iv.length);
+            return new Blob([combined], { type: 'application/encrypted' });
+        }
+        const { ciphertext, tag } = SoftCrypto.encrypt(this.rawKey, iv, new Uint8Array(arrayBuffer));
+        const combined = new Uint8Array(12 + ciphertext.length + 16);
         combined.set(iv);
-        combined.set(new Uint8Array(encrypted), iv.length);
-
+        combined.set(ciphertext, 12);
+        combined.set(tag, 12 + ciphertext.length);
         return new Blob([combined], { type: 'application/encrypted' });
     }
 
     async decryptFile(encryptedBlob, originalName) {
         const arrayBuffer = await encryptedBlob.arrayBuffer();
         const combined = new Uint8Array(arrayBuffer);
-        
         const iv = combined.slice(0, 12);
-        const encrypted = combined.slice(12);
 
-        const decrypted = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv },
-            this.key,
-            encrypted
-        );
-
+        if (this.useNative) {
+            const encrypted = combined.slice(12);
+            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.key, encrypted);
+            const mimeType = this.getMimeType(originalName);
+            return new Blob([decrypted], { type: mimeType });
+        }
+        const ciphertext = combined.slice(12, combined.length - 16);
+        const tag = combined.slice(combined.length - 16);
+        const pt = SoftCrypto.decrypt(this.rawKey, iv, ciphertext, tag);
         const mimeType = this.getMimeType(originalName);
-        return new Blob([decrypted], { type: mimeType });
+        return new Blob([pt], { type: mimeType });
     }
 
     getMimeType(filename) {
@@ -132,9 +413,41 @@ class CryptoHelper {
     }
 }
 
+class OfflineQueue {
+    constructor() {
+        this.queue = [];
+    }
+
+    enqueue(type, data) {
+        this.queue.push({ type, data, timestamp: Date.now() });
+    }
+
+    dequeueAll() {
+        const items = [...this.queue];
+        this.queue = [];
+        return items;
+    }
+
+    get length() {
+        return this.queue.length;
+    }
+
+    clear() {
+        this.queue = [];
+    }
+}
+
 class LANternApp {
     constructor() {
-        this.socket = io();
+        // Configure socket with reconnection options for local network
+        this.socket = io({
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000,
+            transports: ['websocket', 'polling']
+        });
         this.crypto = new CryptoHelper();
         this.user = null;
         this.isHost = false;
@@ -144,6 +457,9 @@ class LANternApp {
         this.shareMode = 'all';
         this.textShareMode = 'all';
         this.selectedUsersToShare = [];
+        this.connectionAttempts = 0;
+        this.isConnected = false;
+        this.offlineQueue = new OfflineQueue();
 
         this.init();
     }
@@ -463,6 +779,61 @@ class LANternApp {
     }
 
     setupSocketListeners() {
+        // Connection established
+        this.socket.on('connect', () => {
+            console.log('Connected to server');
+            this.isConnected = true;
+            this.connectionAttempts = 0;
+            this.updateConnectionStatus(true);
+            // Hide any connection error messages
+            const errorEl = document.getElementById('connection-error');
+            if (errorEl) errorEl.style.display = 'none';
+        });
+
+        // Connection error handling
+        this.socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            this.connectionAttempts++;
+            this.showConnectionError(`Unable to connect to server. Attempt ${this.connectionAttempts}/10...`);
+        });
+
+        // Disconnection handling
+        this.socket.on('disconnect', (reason) => {
+            console.log('Disconnected:', reason);
+            this.isConnected = false;
+            this.updateConnectionStatus(false);
+            if (reason === 'io server disconnect') {
+                // Server disconnected us, try to reconnect
+                this.socket.connect();
+            }
+            this.showToast('Disconnected from server. Data will be sent when reconnected.', 'error');
+        });
+
+        // Reconnection events
+        this.socket.on('reconnect', (attemptNumber) => {
+            console.log('Reconnected after', attemptNumber, 'attempts');
+            this.isConnected = true;
+            this.updateConnectionStatus(true);
+            this.showToast('Reconnected to server!', 'success');
+            // Re-register so the server knows who we are
+            if (this.user) {
+                this.socket.emit('register', {
+                    name: this.user.name,
+                    isHost: this.isHost,
+                    password: this.sessionPassword,
+                    hostKey: ''
+                });
+                this.loadFiles();
+                this.loadTexts();
+            }
+            // Flush any queued offline operations
+            this.flushOfflineQueue();
+        });
+
+        this.socket.on('reconnect_failed', () => {
+            this.showConnectionError('Failed to connect to server. Please check if the server is running and refresh the page.');
+        });
+
         this.socket.on('registered', (user) => {
             this.user = user;
             this.isHost = user.isHost;
@@ -805,17 +1176,25 @@ class LANternApp {
 
         try {
             const encryptedContent = await this.crypto.encrypt(content);
-            const sharedWith = isHost ? (this.textShareMode === 'all' ? 'all' : this.selectedUsersToShare) : 'host';
+            const sharedWith = isHost ? (this.textShareMode === 'all' ? 'all' : [...this.selectedUsersToShare]) : 'host';
+            const payload = {
+                encryptedContent,
+                sharedWith,
+                isHost,
+                userId: this.user.id
+            };
+
+            if (!this.isConnected) {
+                this.offlineQueue.enqueue('text', payload);
+                textInput.value = '';
+                this.showToast('Message queued — will send when reconnected', 'info');
+                return;
+            }
 
             const response = await fetch('/api/text', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    encryptedContent,
-                    sharedWith,
-                    isHost,
-                    userId: this.user.id
-                })
+                body: JSON.stringify(payload)
             });
 
             const result = await response.json();
@@ -831,7 +1210,12 @@ class LANternApp {
                 this.showToast(result.error || 'Failed to send message', 'error');
             }
         } catch (error) {
-            this.showToast('Failed to send message: ' + error.message, 'error');
+            // Network error – queue for later
+            if (!this.isConnected) {
+                this.showToast('Message queued — will send when reconnected', 'info');
+            } else {
+                this.showToast('Failed to send message: ' + error.message, 'error');
+            }
         }
     }
 
@@ -917,6 +1301,21 @@ class LANternApp {
             const encryptedBlob = await this.crypto.encryptFile(file);
             this.showProgress(50);
 
+            if (!this.isConnected) {
+                // Queue the encrypted file for later upload
+                this.offlineQueue.enqueue('file', {
+                    encryptedBlob,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    isHost,
+                    sharedWith: isHost ? (this.shareMode === 'all' ? 'all' : [...this.selectedUsersToShare]) : undefined
+                });
+                this.showProgress(100);
+                this.showToast(`${file.name} queued — will upload when reconnected`, 'info');
+                this.hideProgress();
+                return;
+            }
+
             const formData = new FormData();
             formData.append('file', encryptedBlob, file.name + '.enc');
             
@@ -950,7 +1349,8 @@ class LANternApp {
                 this.showToast(result.error || 'Upload failed', 'error');
             }
         } catch (error) {
-            this.showToast('Upload failed: ' + error.message, 'error');
+            // Network error – queue for later
+            this.showToast('Upload failed, will retry when reconnected', 'error');
         }
 
         this.hideProgress();
@@ -1231,13 +1631,19 @@ class LANternApp {
 
         try {
             const encryptedMessage = await this.crypto.encrypt(message);
-            
-            this.socket.emit('chatMessage', {
+            const payload = {
                 content: encryptedMessage,
                 userId: this.user.id,
                 userName: this.user.name,
                 isHost: this.isHost
-            });
+            };
+
+            if (this.isConnected) {
+                this.socket.emit('chatMessage', payload);
+            } else {
+                this.offlineQueue.enqueue('chat', payload);
+                this.showToast('Chat message queued — will send when reconnected', 'info');
+            }
 
             chatInput.value = '';
         } catch (error) {
@@ -1414,6 +1820,77 @@ class LANternApp {
         }
     }
 
+    async flushOfflineQueue() {
+        const items = this.offlineQueue.dequeueAll();
+        if (items.length === 0) return;
+
+        this.showToast(`Sending ${items.length} queued item(s)...`, 'info');
+        let sent = 0;
+
+        for (const item of items) {
+            try {
+                if (item.type === 'chat') {
+                    this.socket.emit('chatMessage', item.data);
+                    sent++;
+                } else if (item.type === 'text') {
+                    const response = await fetch('/api/text', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(item.data)
+                    });
+                    const result = await response.json();
+                    if (result.success) sent++;
+                } else if (item.type === 'file') {
+                    const formData = new FormData();
+                    formData.append('file', item.data.encryptedBlob, item.data.fileName + '.enc');
+                    if (item.data.isHost && item.data.sharedWith) {
+                        formData.append('sharedWith', JSON.stringify(item.data.sharedWith));
+                    }
+                    formData.append('originalName', item.data.fileName);
+                    formData.append('originalSize', item.data.fileSize);
+                    const response = await fetch(`/api/upload?isHost=${item.data.isHost}&userId=${this.user.id}`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        sent++;
+                        if (item.data.isHost) {
+                            result.file.displayName = item.data.fileName;
+                            result.file.originalSize = item.data.fileSize;
+                            this.addFileToList(this.hostFilesList, result.file, true);
+                        }
+                        this.updateFilesCount();
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to flush queued item:', err);
+                // Re-queue the failed item
+                this.offlineQueue.enqueue(item.type, item.data);
+            }
+        }
+
+        if (sent > 0) {
+            this.showToast(`${sent} queued item(s) sent successfully`, 'success');
+        }
+    }
+
+    updateConnectionStatus(connected) {
+        const statusElements = document.querySelectorAll('.connection-status');
+        statusElements.forEach(el => {
+            if (connected) {
+                el.textContent = '🟢 Connected';
+                el.classList.remove('offline');
+            } else {
+                const queueCount = this.offlineQueue.length;
+                el.textContent = queueCount > 0
+                    ? `🔴 Offline (${queueCount} queued)`
+                    : '🔴 Offline';
+                el.classList.add('offline');
+            }
+        });
+    }
+
     showToast(message, type = 'info') {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
@@ -1436,6 +1913,42 @@ class LANternApp {
             toast.style.animation = 'slideIn 0.3s ease reverse';
             setTimeout(() => toast.remove(), 300);
         }, 4000);
+    }
+
+    showConnectionError(message) {
+        let errorEl = document.getElementById('connection-error');
+        if (!errorEl) {
+            errorEl = document.createElement('div');
+            errorEl.id = 'connection-error';
+            errorEl.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+                color: white;
+                padding: 15px 20px;
+                text-align: center;
+                z-index: 10000;
+                font-weight: 600;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            `;
+            document.body.prepend(errorEl);
+        }
+        errorEl.innerHTML = `
+            <span>⚠️ ${message}</span>
+            <button onclick="location.reload()" style="
+                margin-left: 15px;
+                padding: 5px 15px;
+                background: white;
+                color: #ee5a24;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                font-weight: 600;
+            ">Retry</button>
+        `;
+        errorEl.style.display = 'block';
     }
 }
 

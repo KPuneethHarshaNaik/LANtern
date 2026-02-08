@@ -67,18 +67,8 @@ const httpsAvailable = generateSelfSignedCert();
 
 const app = express();
 
-let server;
-let httpsServer;
-if (httpsAvailable && fs.existsSync(keyPath) && fs.existsSync(certPath)) {
-    const httpsOptions = {
-        key: fs.readFileSync(keyPath),
-        cert: fs.readFileSync(certPath)
-    };
-    httpsServer = https.createServer(httpsOptions, app);
-    server = httpsServer;
-} else {
-    server = http.createServer(app);
-}
+// Use HTTP for maximum compatibility - all devices can connect without certificate issues
+const server = http.createServer(app);
 
 const io = new Server(server);
 
@@ -87,7 +77,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB limit
 
 // Host key - only the person with this key can host a session
 // Change this to your own secret key!
-const HOST_KEY = process.env.HOST_KEY || 'lantern-admin-2026';
+const HOST_KEY = process.env.HOST_KEY || 'Puneeth$6';
 
 // Blocked users storage (by name/IP combination)
 const blockedUsers = new Set(); // Stores identifiers of blocked users
@@ -673,25 +663,15 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start server
 server.listen(PORT, '0.0.0.0', () => {
     const ips = getLocalIPs();
-    const protocol = httpsServer ? 'https' : 'http';
     console.log('\n========================================');
     console.log('   🏮 LANtern - LAN File Sharing');
     console.log('========================================\n');
     console.log(`Server running on port ${PORT}\n`);
     console.log('Access the application at:');
-    console.log(`  Local:    ${protocol}://localhost:${PORT}`);
+    console.log(`  Local:    http://localhost:${PORT}`);
     ips.forEach(ip => {
-        console.log(`  Network:  ${protocol}://${ip}:${PORT}`);
+        console.log(`  Network:  http://${ip}:${PORT}`);
     });
-    if (httpsServer) {
-        console.log('\n⚠️  Note: You will see a certificate warning in browsers.');
-        console.log('   Click "Advanced" → "Proceed" to continue.');
-        console.log('   This is normal for self-signed certificates.');
-    } else {
-        console.log('\n⚠️  Warning: Running in HTTP mode.');
-        console.log('   Encryption may not work over network (non-localhost).');
-        console.log('   Install OpenSSL or node-forge for HTTPS support.');
-    }
     console.log('\nShare the Network URL with others on the same WiFi!');
     console.log('========================================\n');
 });
